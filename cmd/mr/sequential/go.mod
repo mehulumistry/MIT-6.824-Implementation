@@ -1,6 +1,6 @@
 module github.com/arindas/mit-6.824-distributed-systems/cmd/mr/sequential
 
-go 1.17
+go 1.22
 
 replace github.com/arindas/mit-6.824-distributed-systems/pkg/mr => ../../../pkg/mr
 
