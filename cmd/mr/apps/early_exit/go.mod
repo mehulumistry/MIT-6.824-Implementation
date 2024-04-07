@@ -1,7 +1,7 @@
-module github.com/arindas/mit-6.824-distributed-systems/cmd/mr/apps/early_exit
+module github.com/mehulumistry/MIT-6.824-Implementation/cmd/mr/apps/early_exit
 
 go 1.17
 
-replace github.com/arindas/mit-6.824-distributed-systems/pkg/mr => ../../../../pkg/mr
+replace github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr => ../../../../pkg/mr
 
-require github.com/arindas/mit-6.824-distributed-systems/pkg/mr v0.0.0-20220710125105-a6c914671086
+require github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr v0.0.0-20220710125105-a6c914671086

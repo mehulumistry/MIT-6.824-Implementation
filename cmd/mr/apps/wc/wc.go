@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 )
 
 // Map

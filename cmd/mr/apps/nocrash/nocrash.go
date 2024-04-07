@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
+	"mr"
 )
 
 func maybeCrash() {

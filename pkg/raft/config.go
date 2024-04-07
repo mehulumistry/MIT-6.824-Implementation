@@ -10,14 +10,13 @@ package raft
 
 import (
 	"bytes"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 	"log"
 	"math/rand"
 	"runtime"
 	"sync"
 	"testing"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labgob"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
 
 	crand "crypto/rand"
 	"encoding/base64"
@@ -234,13 +233,11 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 	}
 }
 
-//
 // start or re-start a Raft.
 // if one already exists, "kill" it first.
 // allocate new outgoing port file names, and a new
 // state persister, to isolate previous instance of
 // this server. since we cannot really kill it.
-//
 func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 	cfg.crash1(i)
 

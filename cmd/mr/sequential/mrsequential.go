@@ -14,7 +14,7 @@ import (
 	"plugin"
 	"sort"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
+	"mr"
 )
 
 // ByKey for sorting by key.

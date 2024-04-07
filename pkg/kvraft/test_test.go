@@ -2,6 +2,8 @@ package kvraft
 
 import (
 	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/models"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/porcupine"
 	"io/ioutil"
 	"math/rand"
 	"strconv"
@@ -10,9 +12,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/models"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/porcupine"
 )
 
 // The tester generously allows solutions to complete elections in one second
@@ -588,12 +587,10 @@ func TestPersistPartitionUnreliableLinearizable3A(t *testing.T) {
 	GenericTest(t, "3A", 15, 7, true, true, true, -1, true)
 }
 
-//
 // if one server falls behind, then rejoins, does it
 // recover by using the InstallSnapshot RPC?
 // also checks that majority discards committed log entries
 // even if minority doesn't respond.
-//
 func TestSnapshotRPC3B(t *testing.T) {
 	const nservers = 3
 	maxraftstate := 1000

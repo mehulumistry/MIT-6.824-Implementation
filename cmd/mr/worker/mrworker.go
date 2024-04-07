@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
 	"log"
+	"mr"
 	"os"
 	"plugin"
 )

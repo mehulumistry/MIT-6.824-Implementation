@@ -1,11 +1,10 @@
 package shardctrler
 
 import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"os"
 	"testing"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/raft"
 
 	// import "log"
 	crand "crypto/rand"

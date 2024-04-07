@@ -51,6 +51,7 @@ package labrpc
 
 import (
 	"bytes"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
 	"log"
 	"math/rand"
 	"reflect"
@@ -58,8 +59,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labgob"
 )
 
 type reqMsg struct {
@@ -81,7 +80,7 @@ type ClientEnd struct {
 	done    chan struct{} // closed when Network is cleaned up
 }
 
-// send an RPC, wait for the reply.
+// Call send an RPC, wait for the reply.
 // the return value indicates success; false means that
 // no reply was received from the server.
 func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bool {
@@ -332,6 +331,18 @@ func (rn *Network) MakeEnd(endname interface{}) *ClientEnd {
 	return e
 }
 
+func (rn *Network) DeleteEnd(endname interface{}) {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	if _, ok := rn.ends[endname]; !ok {
+		log.Fatalf("MakeEnd: %v doesn't exists\n", endname)
+	}
+	delete(rn.ends, endname)
+	delete(rn.enabled, endname)
+	delete(rn.connections, endname)
+}
+
 func (rn *Network) AddServer(servername interface{}, rs *Server) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -382,11 +393,9 @@ func (rn *Network) GetTotalBytes() int64 {
 	return x
 }
 
-//
 // a server is a collection of services, all sharing
 // the same rpc dispatcher. so that e.g. both a Raft
 // and a k/v server can listen to the same rpc endpoint.
-//
 type Server struct {
 	mu       sync.Mutex
 	services map[string]*Service

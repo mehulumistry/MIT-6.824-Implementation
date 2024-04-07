@@ -1,9 +1,9 @@
 package shardctrler
 
 import (
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labgob"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/raft"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"sync"
 )
 

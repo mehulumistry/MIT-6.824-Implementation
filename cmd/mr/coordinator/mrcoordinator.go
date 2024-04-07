@@ -14,7 +14,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
+	"mr"
 )
 
 func main() {

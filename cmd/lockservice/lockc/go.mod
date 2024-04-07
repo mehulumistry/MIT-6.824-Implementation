@@ -1,3 +1,3 @@
-module github.com/arindas/mit-6.824-distributed-systems/cmd/lockservice/lockc
+module github.com/mehulumistry/MIT-6.824-Implementation/cmd/lockservice/lockc
 
 go 1.17

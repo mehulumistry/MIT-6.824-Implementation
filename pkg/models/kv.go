@@ -2,10 +2,9 @@ package models
 
 import (
 	"fmt"
-	"sort"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/porcupine"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/porcupine"
 )
+import "sort"
 
 type KvInput struct {
 	Op    uint8 // 0 => get, 1 => put, 2 => append
@@ -50,9 +49,12 @@ var KvModel = porcupine.Model{
 		} else if inp.Op == 1 {
 			// put
 			return true, inp.Value
-		} else {
+		} else if inp.Op == 2 {
 			// append
 			return true, (st + inp.Value)
+		} else {
+			// append with return value
+			return out.Value == st, (st + inp.Value)
 		}
 	},
 	DescribeOperation: func(input, output interface{}) string {

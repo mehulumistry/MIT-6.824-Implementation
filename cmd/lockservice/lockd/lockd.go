@@ -12,7 +12,7 @@ package main
 // instead of a and b.
 
 // TODO: implement package
-// "github.com/arindas/mit-6.824-distributed-systems/pkg/lockservice"
+// "lockservice"
 
 func main() {
 	// TODO: implement lockservice and run server

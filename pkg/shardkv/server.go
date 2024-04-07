@@ -3,9 +3,9 @@ package shardkv
 import (
 	"sync"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labgob"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/raft"
+	"labgob"
+	"labrpc"
+	"raft"
 )
 
 type Op struct {
@@ -35,18 +35,15 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 }
 
-//
 // the tester calls Kill() when a ShardKV instance won't
 // be needed again. you are not required to do anything
 // in Kill(), but it might be convenient to (for example)
 // turn off debug output from this instance.
-//
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
 }
 
-//
 // servers[] contains the ports of the servers in this group.
 //
 // me is the index of the current server in servers[].
@@ -73,7 +70,6 @@ func (kv *ShardKV) Kill() {
 //
 // StartServer() must return quickly, so it should start goroutines
 // for any long-running work.
-//
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.

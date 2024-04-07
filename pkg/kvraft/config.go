@@ -1,10 +1,10 @@
 package kvraft
 
 import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"os"
 	"testing"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
 
 	// import "log"
 	crand "crypto/rand"
@@ -16,8 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/raft"
 )
 
 func randstring(n int) string {

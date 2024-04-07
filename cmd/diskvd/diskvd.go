@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"time"
 	// TODO: implement package
-	// "github.com/arindas/mit-6.824-distributed-systems/pkg/diskv"
+	// "diskv"
 )
 
 func usage() {

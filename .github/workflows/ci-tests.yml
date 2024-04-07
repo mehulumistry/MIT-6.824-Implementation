@@ -38,15 +38,66 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - run: cd pkg/raft && go test
-  
-  test-shardctrler:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - run: cd pkg/shardctrler && go test 
-  
+
   test-shardkv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - run: cd pkg/shardkv && go test
+
+
+  test-kvsrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/kvsrv && go test
+
+  test-kvraft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/kvraft && go test
+
+  test-shardkv-2015:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/shardkv-2015 && go test
+
+
+  test-kvpaxos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/kvpaxos && go test
+
+  test-pbservice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/pbservice && go test
+
+  test-shardctrler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/shardctrler && go test
+
+
+  test-shardmaster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/shardmaster && go test
+
+  test-viewservice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/viewservice && go test
+
+  test-diskv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd pkg/diskv && go test

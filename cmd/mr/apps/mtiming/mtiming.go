@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
+	"mr"
 )
 
 func nparallel(phase string) int {

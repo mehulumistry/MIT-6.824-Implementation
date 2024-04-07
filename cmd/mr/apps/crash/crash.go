@@ -10,14 +10,13 @@ package main
 
 import (
 	crand "crypto/rand"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"math/big"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
 )
 
 func maybeCrash() {

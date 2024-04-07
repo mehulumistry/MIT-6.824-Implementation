@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/shardctrler"
+	"labrpc"
+	"shardctrler"
 
 	// import "log"
 	crand "crypto/rand"
@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/raft"
+	"raft"
 )
 
 func randstring(n int) string {

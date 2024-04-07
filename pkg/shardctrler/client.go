@@ -6,10 +6,9 @@ package shardctrler
 
 import (
 	"crypto/rand"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 	"math/big"
 	"time"
-
-	"github.com/arindas/mit-6.824-distributed-systems/pkg/labrpc"
 )
 
 type Clerk struct {
