@@ -1,6 +1,6 @@
 module go101
 
-go 1.22
+go 1.17
 
 // This command will create go.mod file which both defines projects
 // requirements and locks dependencies to their correct versions

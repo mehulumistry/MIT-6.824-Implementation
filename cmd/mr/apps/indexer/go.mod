@@ -1,6 +1,6 @@
 module github.com/arindas/mit-6.824-distributed-systems/cmd/mr/apps/indexer
 
-go 1.22
+go 1.17
 
 replace github.com/arindas/mit-6.824-distributed-systems/pkg/mr => ../../../../pkg/mr
 
