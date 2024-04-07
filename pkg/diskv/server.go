@@ -1,11 +1,14 @@
 package diskv
 
-import "net"
+import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/paxos"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/shardmaster"
+	"net"
+)
 import "fmt"
 import "net/rpc"
 import "log"
 import "time"
-import "paxos"
 import "sync"
 import "sync/atomic"
 import "os"
@@ -13,7 +16,6 @@ import "syscall"
 import "encoding/gob"
 import "encoding/base32"
 import "math/rand"
-import "shardmaster"
 import "io/ioutil"
 import "strconv"
 

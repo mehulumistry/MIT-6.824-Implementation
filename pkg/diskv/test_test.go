@@ -1,7 +1,9 @@
 package diskv
 
-import "testing"
-import "shardmaster"
+import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/shardmaster"
+	"testing"
+)
 import "runtime"
 import "strconv"
 import "strings"

@@ -81,14 +81,14 @@ func (ck *Clerk) PutExt(key string, value string, puttype int) string {
 	return "???"
 }
 
-//func (ck *Clerk) Put(key string, value string) {
-//	ck.PutExt(key, value, PutUpdate)
-//}
-//func (ck *Clerk) PutHash(key string, value string) string {
-//	v := ck.PutExt(key, value, PutHash)
-//	return v
-//}
-//func (ck *Clerk) PutAppend(key string, value string) string {
-//	v := ck.PutExt(key, value, PutAppend)
-//	return v
-//}
+func (ck *Clerk) Put(key string, value string) {
+	//ck.PutExt(key, value, PutUpdate)
+}
+func (ck *Clerk) PutHash(key string, value string) string {
+	v := ck.PutExt(key, value, 4)
+	return v
+}
+func (ck *Clerk) PutAppend(key string, value string) string {
+	v := ck.PutExt(key, value, 4)
+	return v
+}

@@ -1,11 +1,10 @@
 package shardkv
 
 import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"sync"
-
-	"labgob"
-	"labrpc"
-	"raft"
 )
 
 type Op struct {

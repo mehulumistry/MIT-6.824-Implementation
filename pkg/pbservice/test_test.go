@@ -1,7 +1,9 @@
 package pbservice
 
-import "viewservice"
-import "fmt"
+import (
+	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/viewservice"
+)
 import "io"
 import "net"
 import "testing"

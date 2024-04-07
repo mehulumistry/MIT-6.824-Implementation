@@ -1,11 +1,11 @@
 package shardkv
 
 import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/shardctrler"
 	"os"
 	"testing"
-
-	"labrpc"
-	"shardctrler"
 
 	// import "log"
 	crand "crypto/rand"
@@ -17,8 +17,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"raft"
 )
 
 func randstring(n int) string {
