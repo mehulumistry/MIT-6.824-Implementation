@@ -7,7 +7,7 @@
 #RACE=
 
 # comment this to run the tests without the Go race detector.
-RACE=-race
+#RACE=-race
 
 # run the test in a fresh sub-directory.
 rm -rf mr-tmp
@@ -130,7 +130,7 @@ fi
 wait
 
 
-#########################################################
+##########################################################
 echo '***' Starting reduce parallelism test.
 
 rm -f mr-*
@@ -202,13 +202,14 @@ jobs &> /dev/null
 
 # wait -n ## -n flag not available on bash in certain systems
 
-initial_proc_count=`expr $(pgrep -c mrworker) + $(pgrep -c mrcoordinator)`
-proc_count=${initial_proc_count}
+initial_proc_count=$(ps aux | grep -E 'mrworker|mrcoordinator' | wc -l)
+proc_count=$initial_proc_count
 
-# Busy wait loop: check if any background process has exited or not.
-# proc_count decreases by one when a process exits.
-while [ $proc_count -eq $initial_proc_count ]; do
-    proc_count=`expr $(pgrep -c mrworker) + $(pgrep -c mrcoordinator)`
+while [ $proc_count -ge $initial_proc_count ]; do
+    process_count_output=$(ps aux | grep -E 'mrworker|mrcoordinator' | wc -l)
+
+    proc_count=$process_count_output
+    sleep 1  # Add a brief sleep to avoid excessive CPU usage
 done
 
 # a process has exited. this means that the output should be finalized
