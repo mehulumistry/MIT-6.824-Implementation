@@ -21,12 +21,17 @@ import (
 )
 
 func maybeCrash() {
+
+	//If rr.Int64() < 330 (approximately 33% chance), the process still crashes using os.Exit(1).
+
 	max := big.NewInt(1000)
 	rr, _ := crand.Int(crand.Reader, max)
 	if rr.Int64() < 330 {
 		// crash!
+		//println("Crashed.....")
 		os.Exit(1)
 	} else if rr.Int64() < 660 {
+		// If rr.Int64() < 660 (and not less than 330, giving another 33% chance), it introduces a random delay:
 		// delay for a while.
 		maxms := big.NewInt(10 * 1000)
 		ms, _ := crand.Int(crand.Reader, maxms)

@@ -3,7 +3,7 @@ package main
 //
 // simple sequential MapReduce.
 //
-// go run mrsequential.go wc.so pg*.txt
+// go run mrsequential.go ../apps/wc/wc.so  ../../../datasets/project-gutenberg/pg*.txt
 //
 
 import (
@@ -17,7 +17,7 @@ import (
 	"github.com/arindas/mit-6.824-distributed-systems/pkg/mr"
 )
 
-// for sorting by key.
+// ByKey for sorting by key.
 type ByKey []mr.KeyValue
 
 // for sorting by key.
@@ -37,13 +37,11 @@ func main() {
 	// read each input file,
 	// pass it to Map,
 	// accumulate the intermediate Map output.
-	//
+	// array of dictionary.
 	intermediate := []mr.KeyValue{}
 	for _, filename := range os.Args[2:] {
 		file, err := os.Open(filename)
-		if err != nil {
-			log.Fatalf("cannot open %v", filename)
-		}
+
 		content, err := ioutil.ReadAll(file)
 		if err != nil {
 			log.Fatalf("cannot read %v", filename)
@@ -74,10 +72,13 @@ func main() {
 		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
 			j++
 		}
+
+		// key, [A, A, A, A, A, A....]
 		values := []string{}
 		for k := i; k < j; k++ {
 			values = append(values, intermediate[k].Value)
 		}
+
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
@@ -89,13 +90,12 @@ func main() {
 	ofile.Close()
 }
 
-//
 // load the application Map and Reduce functions
 // from a plugin file, e.g. ../mrapps/wc.so
-//
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
 	p, err := plugin.Open(filename)
 	if err != nil {
+		log.Println(err)
 		log.Fatalf("cannot load plugin %v", filename)
 	}
 	xmapf, err := p.Lookup("Map")

@@ -9,7 +9,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -24,7 +23,9 @@ func nparallel(phase string) int {
 	// we're running at the same time as them.
 	pid := os.Getpid()
 	myfilename := fmt.Sprintf("mr-worker-%s-%d", phase, pid)
-	err := ioutil.WriteFile(myfilename, []byte("x"), 0666)
+	err := os.WriteFile(myfilename, []byte("x"), 0666)
+
+	//println("Created file name in map: ", myfilename)
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +53,10 @@ func nparallel(phase string) int {
 			}
 		}
 	}
-	dd.Close()
+	errF := dd.Close()
+	if errF != nil {
+		return 0
+	}
 
 	time.Sleep(1 * time.Second)
 
@@ -72,12 +76,17 @@ func Map(filename string, contents string) []mr.KeyValue {
 	n := nparallel("map")
 
 	kva := []mr.KeyValue{}
+
+	// for every file we are inserting two values
+	// {times-pid, currentTime}
+	// {parallel-pid, }
 	kva = append(kva, mr.KeyValue{
 		fmt.Sprintf("times-%v", pid),
 		fmt.Sprintf("%.1f", ts)})
 	kva = append(kva, mr.KeyValue{
 		fmt.Sprintf("parallel-%v", pid),
 		fmt.Sprintf("%d", n)})
+
 	return kva
 }
 

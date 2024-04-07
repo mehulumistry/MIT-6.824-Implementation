@@ -64,6 +64,7 @@ func nparallel(phase string) int {
 
 func Map(filename string, contents string) []mr.KeyValue {
 
+	// Every map is creating a unique keys, so now we'll have a lot of reducer files
 	kva := []mr.KeyValue{}
 	kva = append(kva, mr.KeyValue{"a", "1"})
 	kva = append(kva, mr.KeyValue{"b", "1"})

@@ -20,6 +20,9 @@ import (
 func maybeCrash() {
 	max := big.NewInt(1000)
 	rr, _ := crand.Int(crand.Reader, max)
+
+	// Below will never happen, it's confusing why we are even calling it, from map and reduce.
+
 	if false && rr.Int64() < 500 {
 		// crash!
 		os.Exit(1)
