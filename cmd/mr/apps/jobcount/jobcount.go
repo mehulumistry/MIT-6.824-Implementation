@@ -10,14 +10,13 @@ package main
 
 import (
 	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"mr"
 )
 
 var count int

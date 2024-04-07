@@ -8,13 +8,12 @@ package main
 
 import (
 	crand "crypto/rand"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"math/big"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-
-	"mr"
 )
 
 func maybeCrash() {

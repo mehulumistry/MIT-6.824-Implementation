@@ -9,12 +9,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"io/ioutil"
 	"os"
 	"syscall"
 	"time"
-
-	"mr"
 )
 
 func nparallel(phase string) int {

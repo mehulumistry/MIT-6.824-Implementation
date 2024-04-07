@@ -12,6 +12,6 @@ replace github.com/mehulumistry/MIT-6.824-Implementation/pkg/models => ../models
 
 replace github.com/mehulumistry/MIT-6.824-Implementation/pkg/porcupine => ../porcupine
 
-require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc v0.0.0-00010101000000-000000000000
+require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc v0.0.0-20240407082225-fea525912f86
 
-require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-00010101000000-000000000000 // indirect
+require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-20240407082225-fea525912f86 // indirect

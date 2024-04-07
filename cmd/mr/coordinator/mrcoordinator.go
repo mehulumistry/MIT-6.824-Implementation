@@ -11,10 +11,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"os"
 	"time"
-
-	"mr"
 )
 
 func main() {

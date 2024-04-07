@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"log"
-	"mr"
 	"os"
 	"plugin"
 )

@@ -7,11 +7,10 @@ package main
 //
 
 import (
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 	"strconv"
 	"strings"
 	"time"
-
-	"mr"
 )
 
 // Map

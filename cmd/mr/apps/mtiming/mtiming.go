@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"mr"
+	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/mr"
 )
 
 func nparallel(phase string) int {
