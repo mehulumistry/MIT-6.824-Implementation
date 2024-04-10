@@ -36,10 +36,12 @@ type KVServer struct {
 	// Your definitions here.
 }
 
+// Get Returns the value and empty string if not exists.
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 }
 
+// PutAppend append to non-existent key should act as if the existing value were a zero length.
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 }

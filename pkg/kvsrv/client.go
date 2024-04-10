@@ -5,6 +5,7 @@ import (
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 
 	"math/big"
+	"time"
 	//"time"
 )
 
@@ -38,9 +39,22 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+	getArgs := GetArgs{
+		key,
+		nrand(),
+	}
+	getReply := GetReply{}
 
-	// You will have to modify this function.
-	return ""
+	for {
+		ok := ck.server.Call("KVServer.Get", &getArgs, &getReply)
+		if ok {
+			return getReply.Value
+		} else {
+			DPrintf("Retrying the request...%v", ShowLast4digit(getArgs.RequestId))
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
 }
 
 // PutAppend shared by Put and Append.
@@ -52,8 +66,18 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
-	// You will have to modify this function.
-	return ""
+	args := &PutAppendArgs{Key: key, Value: value, Op: op, RequestId: nrand()}
+	reply := &PutAppendReply{}
+
+	for {
+		ok := ck.server.Call("KVServer."+op, args, reply)
+		if ok {
+			return reply.Value
+		} else {
+			DPrintf("Retrying the request...%v", ShowLast4digit(args.RequestId))
+		}
+	}
+
 }
 
 func (ck *Clerk) Put(key string, value string) {
