@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -16,7 +18,12 @@ import (
 	"time"
 )
 
+// https://github.com/CyCTW/MIT-6.5840_2024/blob/master/src/models/kv.go
+
 const linearizabilityCheckTimeout = 1 * time.Second
+
+// const DIR = "/Users/mehulmistry/Desktop/main/coding/personal_coding/DistributedSystems/pkg/kvsrv/viz/"
+const DIR = ""
 
 type OpLog struct {
 	operations []porcupine.Operation
@@ -85,7 +92,7 @@ func Append(cfg *config, ck *Clerk, key string, value string, log *OpLog, cli in
 	cfg.op()
 	if log != nil {
 		log.Append(porcupine.Operation{
-			Input:    models.KvInput{Op: 3, Key: key, Value: value},
+			Input:    models.KvInput{Op: 2, Key: key, Value: value},
 			Output:   models.KvOutput{Value: last},
 			Call:     start,
 			Return:   end,
@@ -187,11 +194,40 @@ func randValue(n int) string {
 	return string(b)
 }
 
+func removeAllFilesInDir(dirPath string) error {
+	dir, err := os.Open(dirPath)
+	if err != nil {
+		return err // Error opening the directory
+	}
+	defer dir.Close()
+
+	// Read directory contents
+	contents, err := dir.Readdirnames(0) // 0 to read all names
+	if err != nil {
+		return err
+	}
+
+	// Remove each file or subdirectory
+	for _, filename := range contents {
+		fullPath := filepath.Join(dirPath, filename)
+		err = os.RemoveAll(fullPath) // Removes files or recursively removes directories
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Basic test is as follows: one or more clients submitting Append/Get
 // operations to the server for some period of time.  After the period
 // is over, test checks that all appended values are present and in
 // order for a particular key.  If unreliable is set, RPCs may fail.
 func GenericTest(t *testing.T, nclients int, unreliable bool, randomkeys bool) {
+
+	// clean up the dir.
+	_ = removeAllFilesInDir(DIR)
+
 	const (
 		NITER = 3
 		TIME  = 1
@@ -231,6 +267,7 @@ func GenericTest(t *testing.T, nclients int, unreliable bool, randomkeys bool) {
 			defer func() {
 				clnts[cli] <- j
 			}()
+
 			last := "" // only used when not randomkeys
 			if !randomkeys {
 				Put(cfg, myck, strconv.Itoa(cli), last, opLog, cli)
@@ -296,7 +333,7 @@ func GenericTest(t *testing.T, nclients int, unreliable bool, randomkeys bool) {
 
 	res, info := porcupine.CheckOperationsVerbose(models.KvModel, opLog.Read(), linearizabilityCheckTimeout)
 	if res == porcupine.Illegal {
-		file, err := ioutil.TempFile("", "*.html")
+		file, err := ioutil.TempFile(DIR, "*.html")
 		if err != nil {
 			fmt.Printf("info: failed to create temp file for visualization")
 		} else {
@@ -349,7 +386,7 @@ func TestUnreliableOneKey2(t *testing.T) {
 			nv := "x " + strconv.Itoa(me) + " " + strconv.Itoa(n) + " y"
 			ov := Append(cfg, myck, "k", nv, nil, -1)
 			n++
-			// log.Printf("%d: append nv %v ov %v\n", me, nv, ov)
+			//log.Printf("%d: append nv %v ov %v, client: %v, upto: %v\n", me, nv, ov, nclient, upto)
 			if inHistory(nv, ov) {
 				t.Fatalf("error: nv %v in returned values\n%v\n", nv, ov)
 			}
