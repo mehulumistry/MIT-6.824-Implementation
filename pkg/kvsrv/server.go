@@ -29,7 +29,7 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 type KVServer struct {
 	mu      sync.Mutex
 	inMem   map[string]string
-	seenIds map[int64][2]interface{}
+	seenIds map[int64]uint64
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -60,9 +60,8 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// 1. Check for Duplicates
 	if existingData, exists := kv.seenIds[args.RequestId]; exists {
 		DPrintf("Duplicate Request...%v", ShowLast4digit(args.RequestId))
-		key := existingData[0].(string)
-		endIndex := existingData[1].(uint64)
-		reply.Value = kv.inMem[key][0:endIndex]
+		endIndex := existingData
+		reply.Value = kv.inMem[args.Key][0:endIndex]
 		return
 	}
 
@@ -71,7 +70,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// 2. Process the Request (existing logic)
 	if args.Op == "Put" {
 		kv.inMem[args.Key] = args.Value
-		kv.seenIds[args.RequestId] = [2]interface{}{args.Key, uint64(len(args.Value))}
+		kv.seenIds[args.RequestId] = uint64(len(args.Value))
 	} else if args.Op == "Append" {
 		oldValue, exists := kv.inMem[args.Key]
 		if !exists {
@@ -79,7 +78,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		}
 		kv.inMem[args.Key] = oldValue + args.Value
 		reply.Value = oldValue
-		kv.seenIds[args.RequestId] = [2]interface{}{args.Key, uint64(len(oldValue))}
+		kv.seenIds[args.RequestId] = uint64(len(oldValue))
 	}
 
 	DPrintf("InMem now value for key: %v, %v, Op: %v", args.Key, kv.inMem[args.Key], args.Op)
@@ -96,9 +95,9 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 
 func StartKVServer() *KVServer {
 	kv := &KVServer{
-		mu:      sync.Mutex{},                   // Initialize the mutex
-		inMem:   make(map[string]string),        // Initialize the in-memory map
-		seenIds: make(map[int64][2]interface{}), // Initialize the RequestId tracking map
+		mu:      sync.Mutex{},            // Initialize the mutex
+		inMem:   make(map[string]string), // Initialize the in-memory map
+		seenIds: make(map[int64]uint64),  // Initialize the RequestId tracking map
 	}
 	return kv
 }

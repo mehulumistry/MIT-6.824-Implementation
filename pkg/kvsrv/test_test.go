@@ -534,6 +534,7 @@ func TestMemPutManyClients(t *testing.T) {
 	runtime.ReadMemStats(&st)
 	m1 := st.HeapAlloc
 	f := (float64(m1) - float64(m0)) / NCLIENT
+	fmt.Printf("Mem: %v and %v", m1)
 	if m1 > m0+(NCLIENT*200) {
 		t.Fatalf("error: server using too much memory %d %d (%.2f per client)\n", m0, m1, f)
 	}
