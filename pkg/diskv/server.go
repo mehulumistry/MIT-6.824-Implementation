@@ -180,7 +180,7 @@ func (kv *DisKV) isunreliable() bool {
 	return atomic.LoadInt32(&kv.unreliable) != 0
 }
 
-// Start a shardkv server.
+// StartServer Start a shardkv server.
 // gid is the ID of the server's replica group.
 // shardmasters[] contains the ports of the
 //

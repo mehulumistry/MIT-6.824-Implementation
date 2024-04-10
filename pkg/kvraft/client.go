@@ -26,8 +26,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	return ck
 }
 
-// Get
-// fetch the current value for a key.
+// Get fetch the current value for a key.
 // returns "" if the key does not exist.
 // keeps trying forever in the face of all other errors.
 //
@@ -43,8 +42,7 @@ func (ck *Clerk) Get(key string) string {
 	return ""
 }
 
-// PutAppend
-// shared by Put and Append.
+// PutAppend shared by Put and Append.
 //
 // you can send an RPC with code like this:
 // ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)

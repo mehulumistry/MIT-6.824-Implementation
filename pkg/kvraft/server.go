@@ -36,18 +36,15 @@ type KVServer struct {
 	// Your definitions here.
 }
 
-// Get Returns the value and empty string if not exists.
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 }
 
-// PutAppend append to non-existent key should act as if the existing value were a zero length.
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
 }
 
-// Kill
-// the tester calls Kill() when a KVServer instance won't
+// Kill the tester calls Kill() when a KVServer instance won't
 // be needed again. for your convenience, we supply
 // code to set rf.dead (without needing a lock),
 // and a killed() method to test rf.dead in
@@ -66,8 +63,7 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
-// StartKVServer
-// servers[] contains the ports of the set of
+// StartKVServer servers[] contains the ports of the set of
 // servers that will cooperate via Raft to
 // form the fault-tolerant key/value service.
 // me is the index of the current server in servers[].

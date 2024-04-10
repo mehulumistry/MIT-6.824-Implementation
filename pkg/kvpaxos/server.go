@@ -59,7 +59,7 @@ func (kv *KVPaxos) kill() {
 	kv.px.Kill()
 }
 
-// servers[] contains the ports of the set of
+// StartServer servers[] contains the ports of the set of
 // servers that will cooperate via Paxos to
 // form the fault-tolerant key/value service.
 // me is the index of the current server in servers[].
