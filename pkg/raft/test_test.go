@@ -8,8 +8,10 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
+import (
+	"fmt"
+	"testing"
+)
 import "time"
 import "math/rand"
 import "sync/atomic"
@@ -59,9 +61,13 @@ func TestReElection3A(t *testing.T) {
 
 	leader1 := cfg.checkOneLeader()
 
+	//fmt.Println("====> Check One Leader, disconnecting this leader now... =====", leader1)
+
 	// if the leader disconnects, a new one should be elected.
 	cfg.disconnect(leader1)
+
 	cfg.checkOneLeader()
+	//fmt.Println("====> Check One Leader, connecting the same leader now... =====", leader1)
 
 	// if the old leader rejoins, that shouldn't
 	// disturb the new leader. and the old leader
@@ -69,22 +75,44 @@ func TestReElection3A(t *testing.T) {
 	cfg.connect(leader1)
 	leader2 := cfg.checkOneLeader()
 
+	//fmt.Println("====> Check One Leader, disconnecting this leader now... =====", leader2)
+
 	// if there's no quorum, no new leader should
 	// be elected.
 	cfg.disconnect(leader2)
+
+	//fmt.Println("====> Check One Leader, disconnecting another server now... =====", (leader2+1)%servers)
+
 	cfg.disconnect((leader2 + 1) % servers)
+
+	//fmt.Println("====> Sleepingggg... for 2 seconds  =====")
+
 	time.Sleep(2 * RaftElectionTimeout)
 
 	// check that the one connected server
 	// does not think it is the leader.
+
+	//fmt.Println("====> Check No leader should exist because 2 servers are disconnected =====")
+
 	cfg.checkNoLeader()
+
+	//fmt.Println("====> Connecting one server, it should start election now =====", (leader2+1)%servers)
 
 	// if a quorum arises, it should elect a leader.
 	cfg.connect((leader2 + 1) % servers)
+
+	//fmt.Println("====> Checking one leader is there or not. =====")
+
 	cfg.checkOneLeader()
 
 	// re-join of last node shouldn't prevent leader from existing.
+
+	//fmt.Println("====> Connect one more server  =====", leader2)
+
 	cfg.connect(leader2)
+
+	//fmt.Println("====> Checking one leader is there or not. =====")
+
 	cfg.checkOneLeader()
 
 	cfg.end()
