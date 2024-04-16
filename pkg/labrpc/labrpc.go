@@ -447,7 +447,7 @@ func (rs *Server) GetCount() int {
 	return rs.count
 }
 
-// an object with methods that can be called via RPC.
+// Service an object with methods that can be called via RPC.
 // a single server may have more than one Service.
 type Service struct {
 	name    string

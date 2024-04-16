@@ -3,7 +3,7 @@ package viewservice
 import "net/rpc"
 import "fmt"
 
-// the viewservice Clerk lives in the client
+// the view service Clerk lives in the client
 // and maintains a little state.
 type Clerk struct {
 	me     string // client's name (host:port)

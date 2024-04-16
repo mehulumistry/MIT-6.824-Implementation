@@ -8,6 +8,8 @@ import "sync"
 import "fmt"
 import "os"
 
+// http://nil.csail.mit.edu/6.824/2015/labs/lab-2.html
+
 type ViewServer struct {
 	mu   sync.Mutex
 	l    net.Listener

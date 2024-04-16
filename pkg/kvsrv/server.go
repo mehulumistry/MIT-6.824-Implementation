@@ -20,10 +20,8 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-// Can you do something with conditional writes?
-// Monotonic clock?
 // Also, validate your excalidraw case, how porcupine is making sure that in concurrent cases, two cases 1, or 2 both
-// possible and and in case of 5 concurrent threads there can be more possibilities. How porupine is passing the test cases
+// possible and in case of 5 concurrent threads there can be more possibilities. How porupine is passing the test cases
 // in those cases. Also, it's giving your errors in real time, then does it even checks the sequential vs your server. I doubt
 
 type KVServer struct {
