@@ -207,7 +207,7 @@ func TestRPCBytes3B(t *testing.T) {
 	cfg.end()
 }
 
-// test just failure of followers.
+// test just failure of followers., EXTRAAAAA
 func TestFollowerFailure3B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -252,7 +252,7 @@ func TestFollowerFailure3B(t *testing.T) {
 	cfg.end()
 }
 
-// test just failure of leaders.
+// test just failure of leaders. EXTRAAAAA
 func TestLeaderFailure3B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -518,78 +518,6 @@ func TestRejoin3B(t *testing.T) {
 	cfg.end()
 }
 
-func TestBackup3B(t *testing.T) {
-	servers := 5
-	cfg := make_config(t, servers, false, false)
-	defer cfg.cleanup()
-
-	cfg.begin("Test (3B): leader backs up quickly over incorrect follower logs")
-
-	cfg.one(rand.Int(), servers, true)
-
-	// put leader and one follower in a partition
-	leader1 := cfg.checkOneLeader()
-	cfg.disconnect((leader1 + 2) % servers)
-	cfg.disconnect((leader1 + 3) % servers)
-	cfg.disconnect((leader1 + 4) % servers)
-
-	// submit lots of commands that won't commit
-	for i := 0; i < 50; i++ {
-		cfg.rafts[leader1].Start(rand.Int())
-	}
-
-	time.Sleep(RaftElectionTimeout / 2)
-
-	cfg.disconnect((leader1 + 0) % servers)
-	cfg.disconnect((leader1 + 1) % servers)
-
-	// allow other partition to recover
-	cfg.connect((leader1 + 2) % servers)
-	cfg.connect((leader1 + 3) % servers)
-	cfg.connect((leader1 + 4) % servers)
-
-	// lots of successful commands to new group.
-	for i := 0; i < 50; i++ {
-		cfg.one(rand.Int(), 3, true)
-	}
-
-	// now another partitioned leader and one follower
-	leader2 := cfg.checkOneLeader()
-	other := (leader1 + 2) % servers
-	if leader2 == other {
-		other = (leader2 + 1) % servers
-	}
-	cfg.disconnect(other)
-
-	// lots more commands that won't commit
-	for i := 0; i < 50; i++ {
-		cfg.rafts[leader2].Start(rand.Int())
-	}
-
-	time.Sleep(RaftElectionTimeout / 2)
-
-	// bring original leader back to life,
-	for i := 0; i < servers; i++ {
-		cfg.disconnect(i)
-	}
-	cfg.connect((leader1 + 0) % servers)
-	cfg.connect((leader1 + 1) % servers)
-	cfg.connect(other)
-
-	// lots of successful commands to new group.
-	for i := 0; i < 50; i++ {
-		cfg.one(rand.Int(), 3, true)
-	}
-
-	// now everyone
-	for i := 0; i < servers; i++ {
-		cfg.connect(i)
-	}
-	cfg.one(rand.Int(), servers, true)
-
-	cfg.end()
-}
-
 func TestCount3B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
@@ -695,6 +623,95 @@ loop:
 
 	if total3-total2 > 3*20 {
 		t.Fatalf("too many RPCs (%v) for 1 second of idleness\n", total3-total2)
+	}
+
+	cfg.end()
+}
+
+func TestBackup3B(t *testing.T) {
+	servers := 5
+	cfg := make_config(t, servers, false, false)
+	defer cfg.cleanup()
+
+	cfg.begin("Test (3B): leader backs up quickly over incorrect follower logs")
+
+	cfg.one(rand.Int(), servers, true)
+
+	// put leader and one follower in a partition
+	leader1 := cfg.checkOneLeader()
+	cfg.disconnect((leader1 + 2) % servers)
+	cfg.disconnect((leader1 + 3) % servers)
+	cfg.disconnect((leader1 + 4) % servers)
+
+	// submit lots of commands that won't commit
+	for i := 0; i < 50; i++ {
+		cfg.rafts[leader1].Start(rand.Int())
+	}
+
+	time.Sleep(RaftElectionTimeout / 2)
+
+	cfg.disconnect((leader1 + 0) % servers)
+	cfg.disconnect((leader1 + 1) % servers)
+
+	// allow other partition to recover
+	cfg.connect((leader1 + 2) % servers)
+	cfg.connect((leader1 + 3) % servers)
+	cfg.connect((leader1 + 4) % servers)
+
+	// lots of successful commands to new group.
+	for i := 0; i < 50; i++ {
+		cfg.one(rand.Int(), 3, true)
+	}
+
+	// now another partitioned leader and one follower
+	leader2 := cfg.checkOneLeader()
+	other := (leader1 + 2) % servers
+	if leader2 == other {
+		other = (leader2 + 1) % servers
+	}
+	cfg.disconnect(other)
+
+	// lots more commands that won't commit
+	for i := 0; i < 50; i++ {
+		cfg.rafts[leader2].Start(rand.Int())
+	}
+
+	time.Sleep(RaftElectionTimeout / 2)
+
+	// bring original leader back to life,
+	for i := 0; i < servers; i++ {
+		cfg.disconnect(i)
+	}
+	cfg.connect((leader1 + 0) % servers)
+	cfg.connect((leader1 + 1) % servers)
+	cfg.connect(other)
+
+	// lots of successful commands to new group.
+	for i := 0; i < 50; i++ {
+		randInt := rand.Int()
+		if Debug {
+			fmt.Printf("Checking if it's in atleast 3 servers...%d", randInt)
+		}
+		cfg.one(randInt, 3, true)
+	}
+
+	// now everyone
+	if Debug {
+		fmt.Printf("Bringing back all the server live...")
+	}
+	for i := 0; i < servers; i++ {
+		cfg.connect(i)
+	}
+
+	randInt := rand.Int()
+	if Debug {
+		fmt.Printf("All the servers are live...checking with rand val: %d", randInt)
+	}
+
+	cfg.one(randInt, servers, true)
+
+	if Debug {
+		fmt.Printf("....Done checking...")
 	}
 
 	cfg.end()
