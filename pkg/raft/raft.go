@@ -162,7 +162,7 @@ func (rf *Raft) persist() {
 
 // restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if data == nil || len(data) < 1 {
 		return
 	}
 	r := bytes.NewBuffer(data)
@@ -224,6 +224,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log) - 1 // This now correctly represents the entry's index starting from 1 for real commands
 
 	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[Term: %d]Got a leader, cmd processing... %d", rf.currentTerm, command)
+	rf.persist()
 
 	return index, rf.currentTerm, true
 }
@@ -315,7 +316,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 		shouldPersist = true
-		rf.resetElectionTimer() // Reset the election timer since participation in the election is a sign of server activity
 		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[@@@VOTE_GRANTED@@@] to candidateId %d, and term: %d, %d, lastLogIndex: %d, lastLogTerm:%d", rf.votedFor, args.Term, rf.log, lastLogIndex, lastLogTerm)
 	}
 
