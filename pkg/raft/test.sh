@@ -13,7 +13,7 @@ for i in {1..50}; do
     #     echo "Test 3A failed on iteration $i" >> $log_file
     #     break
     echo "Running Test 3B" >> $log_file
-    timeout 120s go test -run 3B >> $log_file 2>&1
+    timeout 500s go test -run 3C >> $log_file 2>&1
     result=$?
     if [ $result -eq 124 ]; then
         echo "Test 3B timed out on iteration $i" >> $log_file
