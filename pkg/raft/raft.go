@@ -22,12 +22,12 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
+	"github.com/sasha-s/go-deadlock"
 	"math/rand"
 	"sync/atomic"
 	"time"
-
 	//	"bytes"
-	"sync"
+	//"sync"
 )
 
 // ApplyMsg as each Raft peer becomes aware that successive log entries are
@@ -75,13 +75,13 @@ type Log struct {
 
 // Raft A Go object implementing a single Raft peer.
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	//mu        sync.Mutex          // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
-
-	killCh chan struct{}
+	mu        deadlock.RWMutex
+	killCh    chan struct{}
 
 	lastActivityTime    time.Time
 	electionTimeout     time.Duration
@@ -272,7 +272,7 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	go rf.ticker()
 	go rf.applyLogEntriesPeriodically()
 
-	//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Fully up")
+	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Fully up")
 	return rf
 }
 
@@ -284,13 +284,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	lastLogIndex, lastLogTerm := rf.lastLogTermIndex()
 
-	////DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[ELECTION_TIME_RESET], [Term: %d] AND TIME: %s, ELECTION TIMEOUT: %d", rf.currentTerm)
+	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[ELECTION_TIME_RESET], [Term: %d] AND TIME: %s, ELECTION TIMEOUT: %d", rf.currentTerm)
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
 	// If the current term is higher, reject the request vote
 	if rf.currentTerm > args.Term {
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Current term is higher %d, rejecting the RequestVote for candidate %d and term: %d\n", rf.currentTerm, args.CandidateId, args.Term)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Current term is higher %d, rejecting the RequestVote for candidate %d and term: %d\n", rf.currentTerm, args.CandidateId, args.Term)
 		return
 	}
 
@@ -316,7 +316,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = true
 		shouldPersist = true
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[@@@VOTE_GRANTED@@@] to candidateId %d, and term: %d, %d, lastLogIndex: %d, lastLogTerm:%d", rf.votedFor, args.Term, rf.log, lastLogIndex, lastLogTerm)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[@@@VOTE_GRANTED@@@] to candidateId %d, and term: %d, %d, lastLogIndex: %d, lastLogTerm:%d", rf.votedFor, args.Term, rf.log, lastLogIndex, lastLogTerm)
 	}
 
 	if shouldPersist {
@@ -333,7 +333,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// If outdated AppendEntries then reject the call.
 	if rf.currentTerm > args.Term {
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Term is higher rejecting append entries new term: [%d], leader %d\n", rf.currentTerm, args.LeaderId)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Term is higher rejecting append entries new term: [%d], leader %d\n", rf.currentTerm, args.LeaderId)
 		return
 	}
 
@@ -346,7 +346,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = args.Term
 		rf.updateToFollowerRoleAndCatchUpNewTerm(args.Term, false)
 		shouldPersist = true
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Got heartbeat from the new term: [%d], leader %d\n", rf.currentTerm, args.LeaderId)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Got heartbeat from the new term: [%d], leader %d\n", rf.currentTerm, args.LeaderId)
 	}
 
 	logInconsistent := args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm
@@ -360,7 +360,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.XLen = len(rf.log)
 		reply.XTerm = -1
 		reply.XIndex = -1
-		////DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Follower log is too short: [%d], leader %d\n", reply.XLen, args.LeaderId)
+		//DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Follower log is too short: [%d], leader %d\n", reply.XLen, args.LeaderId)
 
 		return
 	}
@@ -374,7 +374,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			xIndex--
 		}
 		reply.XIndex = xIndex
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Leader doesn't have Xterm: [%d], Xindx %d\n", reply.XTerm, reply.XIndex)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Leader doesn't have Xterm: [%d], Xindx %d\n", reply.XTerm, reply.XIndex)
 
 		return
 	}
@@ -393,17 +393,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 
 		// Append new entries
-		//beforeIndex := len(rf.log) - 1
+		beforeIndex := len(rf.log) - 1
 		rf.log = append(rf.log, args.LogEntries...)
 		shouldPersist = true
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Appending entry: %d, commmitIndx: %d", rf.log[beforeIndex:], rf.commitIndex)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Appending entry: %d, commmitIndx: %d", rf.log[beforeIndex:], rf.commitIndex)
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
 		// If it comes here, as a form of heartbeat or anything It's appending twice.
-		//beforeTerm := rf.commitIndex
+		beforeTerm := rf.commitIndex
 		rf.commitIndex = minR(args.LeaderCommit, len(rf.log)-1)
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Updating commit Indx of follower from %d to %d", beforeTerm, rf.commitIndex)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Updating commit Indx of follower from %d to %d", beforeTerm, rf.commitIndex)
 
 	}
 
@@ -418,6 +418,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // --------------------------- CMD/Logs Agreement  --------------------------------- //
 
 func (rf *Raft) startAgreement() {
+	startTime := time.Now()
 
 	successCh := make(chan int, len(rf.peers))
 
@@ -480,8 +481,8 @@ func (rf *Raft) startAgreement() {
 					}
 					if count >= rf.quorumSize && rf.log[index].Term == rf.currentTerm {
 						rf.commitIndex = index
-						//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[COMMIT--INDEX][commitIndx: %d] "+
-						//	"commit index updated", rf.commitIndex)
+						DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[COMMIT--INDEX][commitIndx: %d] "+
+							"commit index updated", rf.commitIndex)
 
 					}
 				}
@@ -492,6 +493,9 @@ func (rf *Raft) startAgreement() {
 			time.Sleep(RPC_CALLS_SLEEP)
 		}
 	}()
+
+	DPrintf("⏱ [Total Start Agreement Duration] Node: %d took %v", rf.me, time.Since(startTime))
+
 }
 
 func (rf *Raft) callAppendEntries(
@@ -513,10 +517,10 @@ func (rf *Raft) callAppendEntries(
 
 	var reply AppendEntriesReply
 
-	//DprintfId(rf.me, serverRoleToStr(rf.serverRole),
-	//	"[REQUEST][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-	//		"%d --> %d, entries to send: [%d], nextIndx: [%d]", rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex,
-	//	rf.me, server, entries, rf.nextIndex)
+	DPrintfId(rf.me, serverRoleToStr(rf.serverRole),
+		"[REQUEST][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+			"%d --> %d, entries to send: [%d], nextIndx: [%d]", rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex,
+		rf.me, server, entries, rf.nextIndex)
 
 	var ok = false
 	if server == rf.me {
@@ -537,9 +541,9 @@ func (rf *Raft) callAppendEntries(
 		rf.nextIndex[server] = prevLogIndex + len(entries) + 1
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 
-		//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[SUCCESS][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-		//	"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
-		//rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
+		DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[SUCCESS][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+			"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
+			rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
 		indx := rf.matchIndex[server]
 		rf.mu.Unlock()
 		return indx
@@ -551,8 +555,8 @@ func (rf *Raft) callAppendEntries(
 		return -1
 	}
 
-	//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[FAILED][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-	//	"%d --> %d, decrement nextIndex %d, [XTerm: %d, XIndx: %d, XLen: %d]", rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, reply.XTerm, reply.XIndex, reply.XLen)
+	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[FAILED][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+		"%d --> %d, decrement nextIndex %d, [XTerm: %d, XIndx: %d, XLen: %d]", rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, reply.XTerm, reply.XIndex, reply.XLen)
 
 	// Handle the case where AppendEntries fails due to log inconsistency
 	if reply.XTerm == -1 {
@@ -772,8 +776,8 @@ func (rf *Raft) startElection() {
 							LastLogTerm:  lastLogTerm,
 							LastLogIndex: lastLogIndex,
 						}
-						//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "[RequestVote] %d ---> %d [Term: %d][LastLogIndx: %d][LastLogTerm: %d]", rf.me,
-						//	peerIndex, rf.currentTerm, requestVoteArgs.LastLogIndex, requestVoteArgs.LastLogTerm)
+						DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[RequestVote] %d ---> %d [Term: %d][LastLogIndx: %d][LastLogTerm: %d]", rf.me,
+							peerIndex, rf.currentTerm, requestVoteArgs.LastLogIndex, requestVoteArgs.LastLogTerm)
 						rf.mu.Unlock()
 
 						var requestVoteReply RequestVoteReply
@@ -816,7 +820,7 @@ func (rf *Raft) startElection() {
 
 				if rf.currentTerm == currentTerm && rf.serverRole == CANDIDATE {
 					rf.updateToLeaderRole()
-					//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "Got enough vote %d [Term: %d]", grantedVotes, rf.currentTerm)
+					DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "Got enough vote %d [Term: %d]", grantedVotes, rf.currentTerm)
 					//Dprintf("************* 👑👑👑👑👑👑 IAM THE LEADER 👑👑👑👑👑 %d**************", rf.me)
 					rf.mu.Unlock()
 
@@ -846,7 +850,7 @@ func (rf *Raft) resetElectionTimer() {
 	rf.electionTimeout = rf.randomizeElectionTimeout()
 }
 func (rf *Raft) updateToFollowerRoleAndCatchUpNewTerm(term int, persist bool) {
-	//DprintfId(rf.me, serverRoleToStr(rf.serverRole), "CATCH UP NEW TERM %s ---> FOLLOWER [Term: %d][NewTerm: %d] \n", serverRoleToStr(rf.serverRole), rf.currentTerm, term)
+	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "CATCH UP NEW TERM %s ---> FOLLOWER [Term: %d][NewTerm: %d] \n", serverRoleToStr(rf.serverRole), rf.currentTerm, term)
 	rf.serverRole = FOLLOWER
 	rf.currentTerm = term
 	rf.votedFor = -1
