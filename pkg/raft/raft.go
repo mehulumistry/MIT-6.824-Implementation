@@ -227,7 +227,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.log) - 1 // This now correctly represents the entry's index starting from 1 for real commands
 
 	DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[Term: %d]Got a leader, cmd processing... %d", rf.currentTerm, command)
-	rf.persist()
+	//rf.persist()
 
 	rf.commandCh <- localLog
 
@@ -580,6 +580,7 @@ func (rf *Raft) handleSuccessAggreement(index int) {
 		if count >= rf.quorumSize && rf.log[index].Term == rf.currentTerm {
 			rf.commitIndex = index
 			DPrintfId(rf.me, serverRoleToStr(rf.serverRole), "[COMMIT--INDEX][commitIndx: %d] commit index updated", rf.commitIndex)
+			rf.persist()
 		}
 	}
 	rf.mu.Unlock()
