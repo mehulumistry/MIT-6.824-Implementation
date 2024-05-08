@@ -18,4 +18,4 @@ require (
 	github.com/mehulumistry/MIT-6.824-Implementation/pkg/porcupine v0.0.0-20240407082225-fea525912f86
 )
 
-require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-20240407082225-fea525912f86 // indirect
+require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-20240430080521-f5af5ee7d58b // indirect

@@ -40,7 +40,6 @@ do
         current=$(grep -o 'ok' $filename | wc -l)
         if [ $current -gt 0 ]; then
             echo "($num) test $testName passed once"
-            rm $filename  # Remove the file as the test passed
         else
             echo "($num) !!!error happened when running test $testName!!!"
             mv $filename "error-$num.txt"  # Rename to indicate an error

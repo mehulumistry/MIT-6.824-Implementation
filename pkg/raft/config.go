@@ -10,6 +10,7 @@ package raft
 
 import (
 	"bytes"
+	"github.com/DistributedClocks/GoVector/govec"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 	"log"
@@ -41,19 +42,20 @@ func makeSeed() int64 {
 }
 
 type config struct {
-	mu          sync.Mutex
-	t           *testing.T
-	finished    int32
-	net         *labrpc.Network
-	n           int
-	rafts       []*Raft
-	applyErr    []string // from apply channel readers
-	connected   []bool   // whether each server is on the net
-	saved       []*Persister
-	endnames    [][]string            // the port file names each sends to
-	logs        []map[int]interface{} // copy of each server's committed entries
-	lastApplied []int
-	start       time.Time // time at which make_config() was called
+	mu           sync.Mutex
+	t            *testing.T
+	testerVClock *govec.GoLog
+	finished     int32
+	net          *labrpc.Network
+	n            int
+	rafts        []*Raft
+	applyErr     []string // from apply channel readers
+	connected    []bool   // whether each server is on the net
+	saved        []*Persister
+	endnames     [][]string            // the port file names each sends to
+	logs         []map[int]interface{} // copy of each server's committed entries
+	lastApplied  []int
+	start        time.Time // time at which make_config() was called
 	// begin()/end() statistics
 	t0        time.Time // time at which test_test.go called cfg.begin()
 	rpcs0     int       // rpcTotal() at start of test
@@ -85,6 +87,13 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 	cfg.logs = make([]map[int]interface{}, cfg.n)
 	cfg.lastApplied = make([]int, cfg.n)
 	cfg.start = time.Now()
+
+	configV := govec.GoLogConfig{
+		PrintOnScreen: true,
+		LogToFile:     true,
+		UseTimestamps: true,
+	}
+	cfg.testerVClock = govec.InitGoVector(fmt.Sprintf("%v", t.Name()), fmt.Sprintf("LogFile-%v", t.Name()), configV)
 
 	cfg.setunreliable(unreliable)
 
@@ -137,6 +146,12 @@ func (cfg *config) crash1(i int) {
 		snapshot := cfg.saved[i].ReadSnapshot()
 		cfg.saved[i] = &Persister{}
 		cfg.saved[i].SaveStateAndSnapshot(raftlog, snapshot)
+		if Debug {
+			fmt.Printf("Snapshot saved server %d\n", i)
+		}
+	}
+	if Debug {
+		fmt.Printf("Crashed server %d\n", i)
 	}
 }
 
@@ -161,16 +176,20 @@ func (cfg *config) checkLogs(i int, m ApplyMsg) (string, bool) {
 
 // applier reads message from apply ch and checks that they match the log
 // contents
-func (cfg *config) applier(i int, applyCh chan ApplyMsg) {
+func (cfg *config) applier(i int, applyCh chan ApplyMsg, vClock *govec.GoLog) {
 	for m := range applyCh {
 		if m.CommandValid == false {
 			// ignore other types of ApplyMsg
 		} else {
 			cfg.mu.Lock()
 			err_msg, prevok := cfg.checkLogs(i, m)
+			//vClock.LogLocalEvent(fmt.Sprintf("Applying Logs %+v", m), govec.GetDefaultLogOptions())
 			cfg.mu.Unlock()
+			if Debug {
+				//fmt.Printf("log %v: log %v; prevOk: %v, cmd: %v\n", m.CommandIndex, cfg.logs[i], prevok, m.Command)
+			}
 			if m.CommandIndex > 1 && prevok == false {
-				err_msg = fmt.Sprintf("server %v apply out of order %v", i, m.CommandIndex)
+				err_msg = fmt.Sprintf("server %v apply out of order %v, command: %d", i, m.CommandIndex, m.Command)
 			}
 			if err_msg != "" {
 				log.Fatalf("apply error: %v", err_msg)
@@ -212,21 +231,45 @@ func (cfg *config) ingestSnap(i int, snapshot []byte, index int) string {
 const SnapShotInterval = 10
 
 // periodically snapshot raft state
-func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
+func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg, vClock *govec.GoLog) {
 	cfg.mu.Lock()
 	rf := cfg.rafts[i]
 	cfg.mu.Unlock()
 	if rf == nil {
 		return // ???
 	}
+	messagePayload := []byte("")
 
 	for m := range applyCh {
+		if Debug {
+			fmt.Println(m)
+		}
 		err_msg := ""
 		if m.SnapshotValid {
 			cfg.mu.Lock()
+			//vClock.LogLocalEvent(fmt.Sprintf("INGESTING SNAP %+v", m), govec.GetDefaultLogOptions())
+
+			if Debug {
+				fmt.Printf(" INGESTING SNAP: %v, indx: %v log %v: log %v;  cmd: %v\n", m.Snapshot, m.SnapshotIndex, m.CommandIndex, cfg.logs[i], m.Command)
+			}
 			err_msg = cfg.ingestSnap(i, m.Snapshot, m.SnapshotIndex)
+
+			snapShotMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending Snapshot Term: %v from: %d to %s, Index: %d", time.Now().String(), m.SnapshotTerm,
+				i, "tester", m.SnapshotIndex), messagePayload, govec.GetDefaultLogOptions())
+			cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage Snapshot in tester: %d", m.SnapshotIndex), snapShotMessage, &messagePayload, govec.GetDefaultLogOptions())
+
 			cfg.mu.Unlock()
 		} else if m.CommandValid {
+			//vClock.LogLocalEvent(fmt.Sprintf("Applying Logs %+v", m), govec.GetDefaultLogOptions())
+
+			vectorClockMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending CMD %v from: %d to %s, Index: %d", time.Now().String(), m.Command,
+				i, "tester", m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
+			cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage CMD in tester: %v", m.Command), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+			if Debug {
+				//fmt.Printf(" INGESTING SNAP: log %v: log %v;  cmd: %v\n", m.CommandIndex, cfg.logs[i], m.Command)
+			}
+
 			if m.CommandIndex != cfg.lastApplied[i]+1 {
 				err_msg = fmt.Sprintf("server %v apply out of order, expected index %v, got %v", i, cfg.lastApplied[i]+1, m.CommandIndex)
 			}
@@ -254,7 +297,15 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 					xlog = append(xlog, cfg.logs[i][j])
 				}
 				e.Encode(xlog)
+				if Debug {
+					//fmt.Printf("Calling snapshot.... for server %d cmdindx: %d\n", i, m.Command)
+				}
 				rf.Snapshot(m.CommandIndex, w.Bytes())
+
+				messageVClock := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Sending SnapShot from: %s to %d, Index: %d", time.Now().String(),
+					"tester", i, m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
+				vClock.UnpackReceive(fmt.Sprintf("Receiving Message in tester: %d", m.CommandIndex), messageVClock, &messagePayload, govec.GetDefaultLogOptions())
+
 			}
 		} else {
 			// Ignore other types of ApplyMsg.
@@ -273,8 +324,10 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 // allocate new outgoing port file names, and a new
 // state persister, to isolate previous instance of
 // this server. since we cannot really kill it.
-func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
+func (cfg *config) start1(i int, applier func(int, chan ApplyMsg, *govec.GoLog)) {
+	vClock := cfg.net.InitVClock(i)
 	cfg.crash1(i)
+	// Remove logs for server i
 
 	// a fresh set of outgoing ClientEnd names.
 	// so that old crashed instance's ClientEnds can't send.
@@ -324,10 +377,11 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 	cfg.rafts[i] = rf
 	cfg.mu.Unlock()
 
-	go applier(i, applyCh)
+	go applier(i, applyCh, vClock)
 
 	svc := labrpc.MakeService(rf)
 	srv := labrpc.MakeServer()
+
 	srv.AddService(svc)
 	cfg.net.AddServer(i, srv)
 }
@@ -377,6 +431,12 @@ func (cfg *config) connect(i int) {
 			cfg.net.Enable(endname, true)
 		}
 	}
+
+	messagePayload := []byte("")
+	vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Connect Event from tester to %d", time.Now().String(),
+		i), messagePayload, govec.GetDefaultLogOptions())
+	cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Connect message from tester"),
+		vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
 }
 
 // detach server i from the net.
@@ -402,6 +462,13 @@ func (cfg *config) disconnect(i int) {
 			cfg.net.Enable(endname, false)
 		}
 	}
+
+	messagePayload := []byte("")
+	vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Disconnect Event from tester to %d",
+		time.Now().String(), i), messagePayload, govec.GetDefaultLogOptions())
+	cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Disconnect message from tester"),
+		vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
 }
 
 func (cfg *config) rpcCount(server int) int {
@@ -561,9 +628,14 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	t0 := time.Now()
 	starts := 0
+
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {
 		// try all the servers, maybe one is the leader.
 		index := -1
+		var vectorClockMessage []byte
+		messagePayload := []byte("")
+		var toLogger *govec.GoLog
+
 		for si := 0; si < cfg.n; si++ {
 			starts = (starts + 1) % cfg.n
 			var rf *Raft
@@ -574,6 +646,14 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			cfg.mu.Unlock()
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
+				toLogger = cfg.net.GetVClock(starts)
+
+				vectorClockMessage = cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s][Role: %s]Sending CMD %v from: %s to %d, Index: %d",
+					time.Now().String(), serverRoleToStr(rf.serverRole), cmd,
+					"tester", starts, index1), messagePayload, govec.GetDefaultLogOptions())
+				toLogger.UnpackReceive(fmt.Sprintf("[time: %s][Role: %s]Receiving Messaage in tester: %v", time.Now().String(), serverRoleToStr(rf.serverRole), cmd),
+					vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
 				if ok {
 					index = index1
 					break
@@ -591,6 +671,10 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 					// committed
 					if cmd1 == cmd {
 						// and it was the command we submitted.
+						//vectorClockMessage = toLogger.PrepareSend(fmt.Sprintf("ACK Sending CMD %s from: %d to %s, Index: %d", cmd,
+						//	starts, "tester", index), messagePayload, govec.GetDefaultLogOptions())
+						//cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage in tester: %s", cmd), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
 						return index
 					}
 				}

@@ -51,6 +51,8 @@ package labrpc
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/DistributedClocks/GoVector/govec"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
 	"log"
 	"math/rand"
@@ -67,6 +69,7 @@ type reqMsg struct {
 	argsType reflect.Type
 	args     []byte
 	replyCh  chan replyMsg
+	me       int
 }
 
 type replyMsg struct {
@@ -95,7 +98,11 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	if err := qe.Encode(args); err != nil {
 		panic(err)
 	}
-	req.args = qb.Bytes()
+
+	payload := qb.Bytes()
+	req.args = payload
+
+	//req.args = e.logger.PrepareSend("Sending Message", payload, govec.GetDefaultLogOptions())
 
 	//
 	// send the request.
@@ -105,6 +112,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 		// the request has been sent.
 	case <-e.done:
 		// entire Network has been destroyed.
+		log.Printf("Network is destroyed... for %d\n\n", e.endname)
 		return false
 	}
 
@@ -113,11 +121,66 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	//
 	rep := <-req.replyCh
 	if rep.ok {
+
 		rb := bytes.NewBuffer(rep.reply)
 		rd := labgob.NewDecoder(rb)
 		if err := rd.Decode(reply); err != nil {
 			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
 		}
+
+		//e.logger.UnpackReceive("Receiving Message", rep.reply, &reply, govec.GetDefaultLogOptions())
+
+		return true
+	} else {
+		return false
+	}
+}
+
+func (e *ClientEnd) CallWithVClock(me int, svcMeth string, args interface{}, reply interface{}) bool {
+	req := reqMsg{}
+	req.endname = e.endname
+	req.svcMeth = svcMeth
+	req.argsType = reflect.TypeOf(args)
+	req.replyCh = make(chan replyMsg)
+	req.me = me
+
+	qb := new(bytes.Buffer)
+	qe := labgob.NewEncoder(qb)
+	if err := qe.Encode(args); err != nil {
+		panic(err)
+	}
+
+	payload := qb.Bytes()
+	req.args = payload
+
+	//req.args = e.logger.PrepareSend("Sending Message", payload, govec.GetDefaultLogOptions())
+
+	//
+	// send the request.
+	//
+	select {
+	case e.ch <- req:
+		// the request has been sent.
+	case <-e.done:
+		// entire Network has been destroyed.
+		log.Printf("Network is destroyed... for %d\n\n", e.endname)
+		return false
+	}
+
+	//
+	// wait for the reply.
+	//
+	rep := <-req.replyCh
+	if rep.ok {
+
+		rb := bytes.NewBuffer(rep.reply)
+		rd := labgob.NewDecoder(rb)
+		if err := rd.Decode(reply); err != nil {
+			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
+		}
+
+		//e.logger.UnpackReceive("Receiving Message", rep.reply, &reply, govec.GetDefaultLogOptions())
+
 		return true
 	} else {
 		return false
@@ -127,16 +190,18 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 type Network struct {
 	mu             sync.Mutex
 	reliable       bool
-	longDelays     bool                        // pause a long time on send on disabled connection
-	longReordering bool                        // sometimes delay replies a long time
-	ends           map[interface{}]*ClientEnd  // ends, by name
-	enabled        map[interface{}]bool        // by end name
-	servers        map[interface{}]*Server     // servers, by name
-	connections    map[interface{}]interface{} // endname -> servername
-	endCh          chan reqMsg
-	done           chan struct{} // closed when Network is cleaned up
-	count          int32         // total RPC count, for statistics
-	bytes          int64         // total bytes send, for statistics
+	longDelays     bool                         // pause a long time on send on disabled connection
+	longReordering bool                         // sometimes delay replies a long time
+	ends           map[interface{}]*ClientEnd   // ends, by name
+	enabled        map[interface{}]bool         // by end name
+	servers        map[interface{}]*Server      // servers, by name
+	vectorClocks   map[interface{}]*govec.GoLog // vector clocks
+
+	connections map[interface{}]interface{} // endname -> servername
+	endCh       chan reqMsg
+	done        chan struct{} // closed when Network is cleaned up
+	count       int32         // total RPC count, for statistics
+	bytes       int64         // total bytes send, for statistics
 }
 
 func MakeNetwork() *Network {
@@ -145,6 +210,7 @@ func MakeNetwork() *Network {
 	rn.ends = map[interface{}]*ClientEnd{}
 	rn.enabled = map[interface{}]bool{}
 	rn.servers = map[interface{}]*Server{}
+	rn.vectorClocks = map[interface{}]*govec.GoLog{}
 	rn.connections = map[interface{}](interface{}){}
 	rn.endCh = make(chan reqMsg)
 	rn.done = make(chan struct{})
@@ -192,7 +258,7 @@ func (rn *Network) LongDelays(yes bool) {
 }
 
 func (rn *Network) readEndnameInfo(endname interface{}) (enabled bool,
-	servername interface{}, server *Server, reliable bool, longreordering bool,
+	servername interface{}, server *Server, reliable bool, longreordering bool, vclock *govec.GoLog,
 ) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
@@ -201,6 +267,7 @@ func (rn *Network) readEndnameInfo(endname interface{}) (enabled bool,
 	servername = rn.connections[endname]
 	if servername != nil {
 		server = rn.servers[servername]
+		vclock = rn.vectorClocks[servername]
 	}
 	reliable = rn.reliable
 	longreordering = rn.longReordering
@@ -218,8 +285,8 @@ func (rn *Network) isServerDead(endname interface{}, servername interface{}, ser
 }
 
 func (rn *Network) processReq(req reqMsg) {
-	enabled, servername, server, reliable, longreordering := rn.readEndnameInfo(req.endname)
-
+	enabled, servername, server, reliable, longreordering, vClockTo := rn.readEndnameInfo(req.endname)
+	vClockFrom := rn.vectorClocks[req.me]
 	if enabled && servername != nil && server != nil {
 		if reliable == false {
 			// short delay
@@ -239,7 +306,7 @@ func (rn *Network) processReq(req reqMsg) {
 		// failure reply.
 		ech := make(chan replyMsg)
 		go func() {
-			r := server.dispatch(req)
+			r := server.dispatch(req, fmt.Sprintf("%d", servername), vClockFrom, vClockTo)
 			ech <- r
 		}()
 
@@ -293,15 +360,19 @@ func (rn *Network) processReq(req reqMsg) {
 		}
 	} else {
 		// simulate no reply and eventual timeout.
+		//fmt.Println("simulate no reply and eventual timeout.")
 		ms := 0
 		if rn.longDelays {
 			// let Raft tests check that leader doesn't send
 			// RPCs synchronously.
 			ms = (rand.Int() % 7000)
+			//fmt.Printf("Going on a long delay journey , %d\n", ms)
 		} else {
 			// many kv tests require the client to try each
 			// server in fairly rapid succession.
 			ms = (rand.Int() % 100)
+			//fmt.Printf("Going on a delay journey, meant for KV server %d\n", ms)
+
 		}
 		time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
 			req.replyCh <- replyMsg{false, nil}
@@ -343,11 +414,47 @@ func (rn *Network) DeleteEnd(endname interface{}) {
 	delete(rn.connections, endname)
 }
 
+func (rn *Network) InitVClock(servername interface{}) *govec.GoLog {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	config := govec.GoLogConfig{
+		PrintOnScreen: true,
+		LogToFile:     true,
+		UseTimestamps: true,
+
+		//EncodingStrategy: func(i interface{}) ([]byte, error) {
+		//	qb := new(bytes.Buffer)
+		//	qe := labgob.NewEncoder(qb)
+		//	if err := qe.Encode(i); err != nil {
+		//		panic(err)
+		//	}
+		//	return qb.Bytes(), nil
+		//},
+		//DecodingStrategy: func(i []byte, i2 interface{}) error {
+		//	rb := bytes.NewBuffer(i)
+		//	rd := labgob.NewDecoder(rb)
+		//	decoded := rd.Decode(i2)
+		//	return decoded
+		//},
+	}
+	logger := govec.InitGoVector(fmt.Sprintf("%v", servername), fmt.Sprintf("LogFile-%v", servername), config)
+	rn.vectorClocks[servername] = logger
+	return logger
+}
+
 func (rn *Network) AddServer(servername interface{}, rs *Server) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
 	rn.servers[servername] = rs
+}
+
+func (rn *Network) GetVClock(i int) *govec.GoLog {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	return rn.vectorClocks[i]
 }
 
 func (rn *Network) DeleteServer(servername interface{}) {
@@ -414,7 +521,7 @@ func (rs *Server) AddService(svc *Service) {
 	rs.services[svc.name] = svc
 }
 
-func (rs *Server) dispatch(req reqMsg) replyMsg {
+func (rs *Server) dispatch(req reqMsg, to string, vClockFrom *govec.GoLog, vClockTo *govec.GoLog) replyMsg {
 	rs.mu.Lock()
 
 	rs.count += 1
@@ -429,7 +536,7 @@ func (rs *Server) dispatch(req reqMsg) replyMsg {
 	rs.mu.Unlock()
 
 	if ok {
-		return service.dispatch(methodName, req)
+		return service.dispatch(methodName, req, to, vClockFrom, vClockTo)
 	} else {
 		choices := []string{}
 		for k, _ := range rs.services {
@@ -487,21 +594,30 @@ func MakeService(rcvr interface{}) *Service {
 	return svc
 }
 
-func (svc *Service) dispatch(methname string, req reqMsg) replyMsg {
+func (svc *Service) dispatch(methname string, req reqMsg, to string, clockFrom *govec.GoLog, clockTo *govec.GoLog) replyMsg {
 	if method, ok := svc.methods[methname]; ok {
 		// prepare space into which to read the argument.
 		// the Value's type will be a pointer to req.argsType.
 		args := reflect.New(req.argsType)
-
 		// decode the argument.
 		ab := bytes.NewBuffer(req.args)
 		ad := labgob.NewDecoder(ab)
 		ad.Decode(args.Interface())
+		//if err != nil {
+		//	fmt.Println(err)
+		//	return replyMsg{}
+		//}
 
+		//printValue("encode", args.Interface())
 		// allocate space for the reply.
 		replyType := method.Type.In(2)
 		replyType = replyType.Elem()
 		replyv := reflect.New(replyType)
+
+		messagePayload := []byte("")
+		vectorClockMessage := clockFrom.PrepareSend(fmt.Sprintf("Sending Messaage %s from: %d to %s, payload: %+v", methname,
+			req.me, to, args.Elem()), messagePayload, govec.GetDefaultLogOptions())
+		clockTo.UnpackReceive(fmt.Sprintf("Receiving Messaage: %s", methname), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
 
 		// call the method.
 		function := method.Func
@@ -511,6 +627,18 @@ func (svc *Service) dispatch(methname string, req reqMsg) replyMsg {
 		rb := new(bytes.Buffer)
 		re := labgob.NewEncoder(rb)
 		re.EncodeValue(replyv)
+		//if err2 != nil {
+		//	fmt.Println(err)
+		//
+		//	return replyMsg{}
+		//}
+		//printValue("decode", replyv.Interface())
+
+		messagePayloadACK := []byte("")
+		vectorClockMessageACK := clockTo.PrepareSend(fmt.Sprintf("Sending Messaage ACK: %s, from: %d to %s, payload: %+v",
+			methname, req.me, to, replyv.Interface()), messagePayloadACK, govec.GetDefaultLogOptions())
+		clockFrom.UnpackReceive(fmt.Sprintf("Receiving ACK Messaage: %s, from %d to %s", methname, req.me, to),
+			vectorClockMessageACK, &messagePayloadACK, govec.GetDefaultLogOptions())
 
 		return replyMsg{true, rb.Bytes()}
 	} else {
@@ -521,5 +649,21 @@ func (svc *Service) dispatch(methname string, req reqMsg) replyMsg {
 		log.Fatalf("labrpc.Service.dispatch(): unknown method %v in %v; expecting one of %v\n",
 			methname, req.svcMeth, choices)
 		return replyMsg{false, nil}
+	}
+}
+
+func printValue(name string, val interface{}) {
+	v := reflect.ValueOf(val)
+
+	// Handle structs:
+	if v.Kind() == reflect.Struct {
+		fmt.Println(name)
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Field(i)
+			fmt.Printf("  %s: %v\n", v.Type().Field(i).Name, field.Interface())
+		}
+	} else {
+		// Handle other types (int, string, etc.)
+		fmt.Printf("%s: %v\n", name, val)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 )
 
 func main() {
@@ -21,8 +22,50 @@ func main() {
 	//fmt.Println(duplicateFound)
 
 	//fmt.Println(IsAnagram("a", "ab"))
-	parent()
+	//parent()
+	go keepMainRunning()
+	fmt.Println("Press the Enter key to exit...")
+	fmt.Scanln()
+}
 
+func keepMainRunning() {
+	go goRountineExp()
+}
+
+func goRountineExp() {
+	numChan := make(chan int)
+	//var wg sync.WaitGroup
+
+	// Start 3 goroutines to generate numbers
+
+	go func() {
+		for i := 1; i <= 3; i++ {
+			//wg.Add(1)
+			go func(id int) {
+				//defer wg.Done()
+				j := 0
+				for {
+					j++
+					fmt.Printf("Sending:[%d] from %d\n", j, id)
+					numChan <- j                // Send a number to the channel
+					time.Sleep(2 * time.Second) // Slow down the loop for clarity
+				}
+			}(i)
+		}
+	}()
+
+	// Close the channel once all sending goroutines are done
+	//go func() {
+	//	wg.Wait()
+	//	close(numChan)
+	//}()
+
+	// Goroutine to receive numbers and print them
+	go func() {
+		for num := range numChan { // This loop automatically ends when the channel is closed
+			fmt.Println("Received:", num)
+		}
+	}()
 }
 
 func Pic(dx, dy int) [][]uint8 {
