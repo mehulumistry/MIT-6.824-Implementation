@@ -249,25 +249,27 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg, vClock *govec.GoLog
 			cfg.mu.Lock()
 			//vClock.LogLocalEvent(fmt.Sprintf("INGESTING SNAP %+v", m), govec.GetDefaultLogOptions())
 
-			if Debug {
-				fmt.Printf(" INGESTING SNAP: %v, indx: %v log %v: log %v;  cmd: %v\n", m.Snapshot, m.SnapshotIndex, m.CommandIndex, cfg.logs[i], m.Command)
-			}
 			err_msg = cfg.ingestSnap(i, m.Snapshot, m.SnapshotIndex)
 
-			snapShotMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending Snapshot Term: %v from: %d to %s, Index: %d", time.Now().String(), m.SnapshotTerm,
-				i, "tester", m.SnapshotIndex), messagePayload, govec.GetDefaultLogOptions())
-			cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage Snapshot in tester: %d", m.SnapshotIndex), snapShotMessage, &messagePayload, govec.GetDefaultLogOptions())
+			if Debug {
+				fmt.Printf(" INGESTING SNAP: %v, indx: %v log %v: log %v;  cmd: %v\n", m.Snapshot, m.SnapshotIndex, m.CommandIndex, cfg.logs[i], m.Command)
+
+				snapShotMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending Snapshot Term: %v from: %d to %s, Index: %d", time.Now().String(), m.SnapshotTerm,
+					i, "tester", m.SnapshotIndex), messagePayload, govec.GetDefaultLogOptions())
+				cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage Snapshot in tester: %d", m.SnapshotIndex), snapShotMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+			}
 
 			cfg.mu.Unlock()
 		} else if m.CommandValid {
 			//vClock.LogLocalEvent(fmt.Sprintf("Applying Logs %+v", m), govec.GetDefaultLogOptions())
 
-			vectorClockMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending CMD %v from: %d to %s, Index: %d", time.Now().String(), m.Command,
-				i, "tester", m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
-			cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage CMD in tester: %v", m.Command), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
-
 			if Debug {
 				//fmt.Printf(" INGESTING SNAP: log %v: log %v;  cmd: %v\n", m.CommandIndex, cfg.logs[i], m.Command)
+				vectorClockMessage := vClock.PrepareSend(fmt.Sprintf("[time: %s]ACK Sending CMD %v from: %d to %s, Index: %d", time.Now().String(), m.Command,
+					i, "tester", m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
+				cfg.testerVClock.UnpackReceive(fmt.Sprintf("Receiving Messaage CMD in tester: %v", m.Command), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
 			}
 
 			if m.CommandIndex != cfg.lastApplied[i]+1 {
@@ -298,13 +300,13 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg, vClock *govec.GoLog
 				}
 				e.Encode(xlog)
 				if Debug {
-					//fmt.Printf("Calling snapshot.... for server %d cmdindx: %d\n", i, m.Command)
+					fmt.Printf("Calling snapshot.... for server %d cmdindx: %d\n", i, m.Command)
+					messageVClock := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Sending SnapShot from: %s to %d, Index: %d", time.Now().String(),
+						"tester", i, m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
+					vClock.UnpackReceive(fmt.Sprintf("Receiving Message in tester: %d", m.CommandIndex), messageVClock, &messagePayload, govec.GetDefaultLogOptions())
+
 				}
 				rf.Snapshot(m.CommandIndex, w.Bytes())
-
-				messageVClock := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Sending SnapShot from: %s to %d, Index: %d", time.Now().String(),
-					"tester", i, m.CommandIndex), messagePayload, govec.GetDefaultLogOptions())
-				vClock.UnpackReceive(fmt.Sprintf("Receiving Message in tester: %d", m.CommandIndex), messageVClock, &messagePayload, govec.GetDefaultLogOptions())
 
 			}
 		} else {
@@ -433,10 +435,14 @@ func (cfg *config) connect(i int) {
 	}
 
 	messagePayload := []byte("")
-	vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Connect Event from tester to %d", time.Now().String(),
-		i), messagePayload, govec.GetDefaultLogOptions())
-	cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Connect message from tester"),
-		vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+	if Debug {
+		vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Connect Event from tester to %d", time.Now().String(),
+			i), messagePayload, govec.GetDefaultLogOptions())
+		cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Connect message from tester"),
+			vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+	}
+
 }
 
 // detach server i from the net.
@@ -464,10 +470,13 @@ func (cfg *config) disconnect(i int) {
 	}
 
 	messagePayload := []byte("")
-	vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Disconnect Event from tester to %d",
-		time.Now().String(), i), messagePayload, govec.GetDefaultLogOptions())
-	cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Disconnect message from tester"),
-		vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+	if Debug {
+		vectorClockMessage := cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s]Disconnect Event from tester to %d",
+			time.Now().String(), i), messagePayload, govec.GetDefaultLogOptions())
+		cfg.net.GetVClock(i).UnpackReceive(fmt.Sprintf("Receiving Disconnect message from tester"),
+			vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+	}
 
 }
 
@@ -648,11 +657,14 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 				index1, _, ok := rf.Start(cmd)
 				toLogger = cfg.net.GetVClock(starts)
 
-				vectorClockMessage = cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s][Role: %s]Sending CMD %v from: %s to %d, Index: %d",
-					time.Now().String(), serverRoleToStr(rf.serverRole), cmd,
-					"tester", starts, index1), messagePayload, govec.GetDefaultLogOptions())
-				toLogger.UnpackReceive(fmt.Sprintf("[time: %s][Role: %s]Receiving Messaage in tester: %v", time.Now().String(), serverRoleToStr(rf.serverRole), cmd),
-					vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+				if Debug {
+					vectorClockMessage = cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s][Role: %s]Sending CMD %v from: %s to %d, Index: %d",
+						time.Now().String(), serverRoleToStr(rf.serverRole), cmd,
+						"tester", starts, index1), messagePayload, govec.GetDefaultLogOptions())
+					toLogger.UnpackReceive(fmt.Sprintf("[time: %s][Role: %s]Receiving Messaage in tester: %v", time.Now().String(), serverRoleToStr(rf.serverRole), cmd),
+						vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+				}
 
 				if ok {
 					index = index1

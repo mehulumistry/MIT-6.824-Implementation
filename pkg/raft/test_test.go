@@ -1312,9 +1312,3 @@ func TestSnapshotInit3D(t *testing.T) {
 	cfg.one(rand.Int(), servers, true)
 	cfg.end()
 }
-
-//            -          ----------------------------- //
-
-func TestElectionRPC(t *testing.T) {
-
-}

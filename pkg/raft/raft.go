@@ -19,7 +19,6 @@ package raft
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
@@ -60,15 +59,15 @@ const (
 )
 
 const (
-	HEARTBEAT_INTERVAL                         = 100 * time.Millisecond // Send heartbeat every 100ms (10 times per second),
-	ElectionTimeoutMin                         = 250 * time.Millisecond
-	ElectionTimeoutMax                         = 800 * time.Millisecond
-	APPLYING_LOGS_AND_PERSIST_FREQ             = 50 * time.Millisecond
-	APPLY_CHANNEL_CALLS_SLEEP                  = 50 * time.Millisecond
-	REQUEST_VOTE_RPC_CALLS_TIMEOUT             = 600 * time.Millisecond
-	APPEND_ENTRIES_RPC_CALLS_TIMEOUT           = 100 * time.Millisecond
-	APPEND_ENTRIES_HEARTBEAT_RPC_CALLS_TIMEOUT = 150 * time.Millisecond
-	APPEND_ENTRIES_CALLS_FREQ                  = 100 * time.Millisecond
+	//HEARTBEAT_INTERVAL             = 100 * time.Millisecond // Send heartbeat every 100ms (10 times per second),
+	ElectionTimeoutMin             = 400 * time.Millisecond
+	ElectionTimeoutMax             = 800 * time.Millisecond
+	APPLYING_LOGS_AND_PERSIST_FREQ = 50 * time.Millisecond
+	//APPLY_CHANNEL_CALLS_SLEEP      = 50 * time.Millisecond
+	//REQUEST_VOTE_RPC_CALLS_TIMEOUT             = 500 * time.Millisecond
+	//APPEND_ENTRIES_RPC_CALLS_TIMEOUT           = 100 * time.Millisecond
+	//APPEND_ENTRIES_HEARTBEAT_RPC_CALLS_TIMEOUT = 150 * time.Millisecond
+	APPEND_ENTRIES_CALLS_FREQ = 100 * time.Millisecond
 )
 
 type Log struct {
@@ -87,8 +86,8 @@ type Raft struct {
 	killCh    chan struct{}
 
 	electionStartTime time.Time
-	//cancelElection     chan struct{}
-	stepDownFromLeader chan struct{}
+	cancelElection    chan struct{}
+	stopLeader        chan struct{}
 
 	electionTimer       *time.Timer
 	applyToStateMachine chan ApplyMsg
@@ -167,6 +166,7 @@ type InstallSnapshotReply struct {
 	Term int // currentTerm, for leader to update itself
 }
 
+// ---------------------- persist functions ----------------------- //
 func (rf *Raft) getRaftStatePersistData() []byte {
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
@@ -219,12 +219,16 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 }
 
+// --------------------------- Utils --------------------------------- //
+
+// truncateLog removes log entries up to and including the lastIncludedIndex
+// and ensures the first log entry starts right after lastIncludedIndex with the correct term.
+// It also ensures that the new log at index 0 starts with the lastIncludedIndex and lastIncludedTerm.
 // CondInstallSnapshot A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	defer rf.deferLogging("[CondInstallSnapshot]", "", rf.me, time.Now(), "")
 
-	//rf.mu.Lock()
 	// Check if the snapshot is more recent than this server's current state
 
 	// Install the snapshot:
@@ -232,83 +236,46 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// 2. Adjust the Raft state (commitIndex, lastApplied, etc.)
 	// 3. Clear and update the log appropriately
 
-	//rf.log = truncateLog(lastIncludedIndex, rf.log)
-	//rf.lastSnapshotIndex = lastIncludedIndex
-	//rf.lastSnapshotTerm = lastIncludedTerm
-	//rf.lastApplied = lastIncludedIndex
-	//
-	//rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole),
-	//	"[SNAPSHOT][INSTALL_SNAPSHOTS][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d], [newLog: %d]", rf.currentTerm, lastIncludedIndex,
-	//	rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex, rf.log)
-	//
-	//// Persist snapshot state along with the truncated log
-	//rf.persister.SaveStateAndSnapshot(rf.getRaftStatePersistData(), snapshot)
-	//rf.mu.Unlock()
-	//
-	//
+	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole),
+		"[SNAPSHOT][INSTALL_SNAPSHOTS][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d], [newLog: %d]", rf.currentTerm, lastIncludedIndex,
+		rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex, rf.log)
+
+	rf.log = truncateLog(lastIncludedIndex, rf.log)
+	rf.lastSnapshotIndex = lastIncludedIndex
+	rf.lastSnapshotTerm = lastIncludedTerm
+	rf.lastApplied = maxR(rf.lastSnapshotIndex, rf.lastApplied)
+
+	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole),
+		"[SNAPSHOT][INSTALLED][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d], [newLog: %d]", rf.currentTerm, lastIncludedIndex,
+		rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex, rf.log)
+
+	// Persist snapshot state along with the truncated log
+	rf.persister.SaveStateAndSnapshot(rf.getRaftStatePersistData(), snapshot)
+
 	return true
 }
-
-// Snapshot the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(commitIndexFromTester int, snapshot []byte) {
+func (rf *Raft) handleSuccessAgreement(index int) {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	defer rf.deferLogging("[Snapshot]", "", rf.me, time.Now(), "")
+	indx := rf.getIndexAddOffset(index, false)
 
-	// Check if snapshotting is needed
-	if commitIndexFromTester <= rf.lastSnapshotIndex || commitIndexFromTester > rf.commitIndex {
-		rf.lg.DPrintfId("args.RequestId", rf.me, serverRoleToStr(rf.serverRole),
-			"[FINISHED][NOTHING_TO_SNAPSHOT_FOR][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d]", rf.currentTerm, commitIndexFromTester,
-			rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex)
-		return
-	}
-	// Find the last term at the snapshot index
-
-	term := rf.log[commitIndexFromTester-rf.lastSnapshotIndex].Term
-
-	// Create a copy of the relevant part of the log
-	// Update the snapshot and snapshot index
-	rf.lastSnapshotTerm = term
-	rf.lastSnapshotIndex = commitIndexFromTester
-
-	prevNextIndex := rf.log[0].Index
-
-	// Replace the old log with the new one
-
-	rf.log = truncateLog(commitIndexFromTester, rf.log)
-
-	if rf.serverRole == LEADER {
-		for server := range rf.peers {
-			if rf.me != server {
-				rf.nextIndex[server] = rf.nextIndex[server] - (rf.lastSnapshotIndex - prevNextIndex)
+	if index > rf.commitIndex {
+		count := 1
+		for _, matchIdx := range rf.matchIndex {
+			if matchIdx >= index {
+				count++
 			}
+		}
+		if count >= rf.quorumSize && rf.log[indx].Term == rf.currentTerm {
+			rf.commitIndex = index
+			rf.lg.DPrintfId(fmt.Sprintf("MatchIndex: %d", indx), rf.me, serverRoleToStr(rf.serverRole), "[COMMIT--INDEX][commitIndx: %d] commit index updated", rf.commitIndex)
+
+			rf.persist()
+
 		}
 	}
 
-	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole),
-		"[SNAPSHOT][CREATING_NEW_LOGS][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d], [newLog: %d]", rf.currentTerm, commitIndexFromTester,
-		rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex, rf.log)
-
-	rf.persister.SaveStateAndSnapshot(rf.getRaftStatePersistData(), snapshot)
-
+	rf.mu.Unlock()
 }
-
-// Start the service using Raft (e.g. a k/v server) wants to start
-// agreement on the next command to be appended to Raft's log. if this
-// server isn't the leader, returns false. otherwise start the
-// agreement and return immediately. there is no guarantee that this
-// command will ever be committed to the Raft log, since the leader
-// may fail or lose an election. even if the Raft instance has been killed,
-// this function should return gracefully.
-//
-// the first return value is the index that the command will appear at
-// if it's ever committed. the second return value is the current
-// term. the third return value is true if this server believes it is
-// the leader
-
 func (rf *Raft) applyLogEntriesToStateMachine() {
 	var entriesToApply []Log
 	rf.mu.Lock()
@@ -335,76 +302,6 @@ func (rf *Raft) applyLogEntriesToStateMachine() {
 	}
 
 }
-
-func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-	rf.mu.Lock()
-	defer rf.deferLogging("[InstallSnapshot]", "Snapshot", rf.me, time.Now(), "")
-
-	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Got InstallSnapshot for the new term: [%d], leader %d\n", rf.currentTerm, args.LeaderID)
-	reply.Term = rf.currentTerm
-
-	// Update term if necessary
-	if args.Term < rf.currentTerm {
-		rf.mu.Unlock()
-		return
-	}
-
-	// Ensure that you follow the second rule in “Rules for Servers” before handling an incoming RPC. The second rule states:
-	if rf.currentTerm < args.Term || rf.serverRole != FOLLOWER {
-		reply.Term = args.Term
-		rf.updateToFollowerRoleAndCatchUpNewTerm(args.Term, "")
-	}
-
-	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Got something from leader install snapshot "+
-		"WithOffset: [logLen: %d, argsPrevIndex: %d, argsPrevTerm: %d, lastSnapShotIndex: %d, logs: %d]\n", len(rf.log), args.LastIncludedIndex,
-		args.LastIncludedTerm, rf.lastSnapshotIndex, rf.log)
-
-	if args.LastIncludedIndex <= rf.lastApplied || rf.lastSnapshotIndex >= args.LastIncludedIndex {
-		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Install snapshot not valid: [argsLastIncluded: %d, lastApplied: %d], "+
-			"other condition [LastSnapshot index: %d, lastIncludedIndex :%D\n", args.LastIncludedIndex,
-			rf.lastApplied, rf.lastSnapshotIndex, args.LastIncludedIndex)
-
-		rf.mu.Unlock()
-		return
-	}
-
-	rf.mu.Unlock()
-
-	select {
-	case rf.applyToStateMachine <- ApplyMsg{
-		SnapshotValid: true,
-		Snapshot:      args.SnapShot,
-		SnapshotTerm:  args.LastIncludedTerm,
-		SnapshotIndex: args.LastIncludedIndex,
-	}:
-	}
-
-	rf.resetElectionTimer("")
-
-	//// Use CondInstallSnapshot to decide if the snapshot should be applied
-	//if !rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.SnapShot) {
-	//	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), " Snapshot is not newer than the current state Term: [%d], leader %d\n", rf.currentTerm, args.LeaderID)
-	//	return // Snapshot is not newer than the current state
-	//}
-
-}
-
-// --------------------------- Utils --------------------------------- //
-
-// truncateLog removes log entries up to and including the lastIncludedIndex
-// and ensures the first log entry starts right after lastIncludedIndex with the correct term.
-// It also ensures that the new log at index 0 starts with the lastIncludedIndex and lastIncludedTerm.
-func truncateLog(lastIncludedIndex int, log []Log) []Log {
-	var newLog []Log
-	// Iterate over the existing log entries
-	for _, entry := range log {
-		if entry.Index >= lastIncludedIndex {
-			newLog = append(newLog, entry)
-		}
-	}
-	return newLog
-}
-
 func (rf *Raft) findLastIndexForTerm(xTerm int) int {
 	for i := len(rf.log) - 1; i >= 0; i-- {
 		if rf.log[i].Term == xTerm {
@@ -414,7 +311,6 @@ func (rf *Raft) findLastIndexForTerm(xTerm int) int {
 	}
 	return -1
 }
-
 func (rf *Raft) performLeadershipRituals() {
 	lastLogIndex := len(rf.log) - 1
 
@@ -430,37 +326,33 @@ func (rf *Raft) performLeadershipRituals() {
 		rf.matchIndex[i] = 0
 	}
 }
-
 func (rf *Raft) getIndexAddOffset(indx int, offset bool) int {
 	if offset {
 		return rf.log[indx-rf.lastSnapshotIndex].Index
 	}
 	return indx - rf.lastSnapshotIndex
 }
-
 func (rf *Raft) getLogLengthWithSnapShotOffset() int {
 	return rf.log[len(rf.log)-1].Index + 1
 }
-
 func (rf *Raft) initFollowerRole() {
 	rf.lg.DPrintfId("INIT", rf.me, serverRoleToStr(rf.serverRole), "INIT NEW TERM %s ---> FOLLOWER [Term: %d][NewTerm: %d] \n", serverRoleToStr(rf.serverRole), rf.currentTerm, 0)
-	wasLeader := rf.serverRole == LEADER
 	rf.serverRole = FOLLOWER
 	rf.votedFor = -1
-	if wasLeader {
-		close(rf.stepDownFromLeader) // This will signal to stop the heartbeats
-	}
 }
-
 func (rf *Raft) updateToFollowerRoleAndCatchUpNewTerm(term int, requestId string) {
 	wasLeader := rf.serverRole == LEADER
+	wasCandidate := rf.serverRole == CANDIDATE
 	rf.lg.DPrintfId(requestId, rf.me, serverRoleToStr(rf.serverRole), "CATCH UP NEW TERM %s ---> FOLLOWER [Term: %d][NewTerm: %d] \n", serverRoleToStr(rf.serverRole), rf.currentTerm, term)
 
 	rf.serverRole = FOLLOWER
 	rf.currentTerm = term
 	rf.votedFor = -1
 	if wasLeader {
-		close(rf.stepDownFromLeader) // This will signal to stop the heartbeats
+		close(rf.stopLeader)
+	}
+	if wasCandidate {
+		close(rf.cancelElection)
 	}
 	rf.persist()
 	rf.resetElectionTimer(requestId)
@@ -495,16 +387,22 @@ func (rf *Raft) updateToCandidateRole(requestId string) {
 	rf.currentTerm += 1
 	rf.votedFor = rf.me
 	if wasLeader {
-		close(rf.stepDownFromLeader) // This will signal to stop the heartbeats
+		close(rf.stopLeader) // This will signal to stop the heartbeats
+	}
+	if wasCandidate {
+		close(rf.cancelElection)
 	}
 	if !wasCandidate {
 		rf.persist()
 	}
+
+	rf.cancelElection = make(chan struct{})
 	rf.resetElectionTimer(requestId)
 }
 func (rf *Raft) updateToLeaderRole() {
 	rf.serverRole = LEADER
-	rf.stepDownFromLeader = make(chan struct{})
+	rf.stopLeader = make(chan struct{})
+	close(rf.cancelElection)
 	rf.performLeadershipRituals()
 	rf.persist()
 }
@@ -513,6 +411,9 @@ func (rf *Raft) lastLogTermIndex() (int, int) {
 	lastTerm := rf.log[rf.getIndexAddOffset(lastIndex, false)].Term
 	return lastIndex, lastTerm
 }
+
+// -----------------------------
+
 func serverRoleToStr(role ServerRole) string {
 	switch role {
 	case LEADER:
@@ -537,6 +438,19 @@ func maxR(a, b int) int {
 	}
 	return b
 }
+func truncateLog(lastIncludedIndex int, log []Log) []Log {
+	var newLog []Log
+	// Iterate over the existing log entries
+	for _, entry := range log {
+		if entry.Index >= lastIncludedIndex {
+			newLog = append(newLog, entry)
+		}
+	}
+	return newLog
+}
+func generateRequestID() string {
+	return fmt.Sprintf("%d", time.Now().Unix())
+}
 
 //////////////////////////// USED BY TESTS /////////////////////////
 
@@ -553,20 +467,15 @@ func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	close(rf.killCh)
 }
-
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
-
-// GetState return currentTerm and whether this server
-// believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.currentTerm, rf.serverRole == LEADER
 }
-
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -613,9 +522,6 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	rf.mu.Lock()
 	rf.quorumSize = (len(peers) / 2) + 1
 	rf.killCh = make(chan struct{})
-	//rf.cancelElection = make(chan struct{})
-	rf.stepDownFromLeader = make(chan struct{})
-
 	rf.currentTerm = 0
 	rf.log = []Log{{
 		Term:    0,
@@ -642,7 +548,45 @@ func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan 
 	return rf
 }
 
-// --------------------------- Leader election  --------------------------------- //
+// Snapshot the service says it has created a snapshot that has
+// all info up to and including index. this means the
+// service no longer needs the log through (and including)
+// that index. Raft should now trim its log as much as possible.
+func (rf *Raft) Snapshot(commitIndexFromTester int, snapshot []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	defer rf.deferLogging("[Snapshot]", "", rf.me, time.Now(), "")
+
+	// Check if snapshotting is needed
+	if commitIndexFromTester <= rf.lastSnapshotIndex || commitIndexFromTester > rf.commitIndex {
+		rf.lg.DPrintfId("args.RequestId", rf.me, serverRoleToStr(rf.serverRole),
+			"[FINISHED][NOTHING_TO_SNAPSHOT_FOR][Term: %d][commitIndexFromTester: %d, commitIndex: %d][lastApplied: %d, lastSnapshotIndex: %d]", rf.currentTerm, commitIndexFromTester,
+			rf.commitIndex, rf.lastApplied, rf.lastSnapshotIndex)
+		return
+	}
+	// Find the last term at the snapshot index
+
+	term := rf.log[commitIndexFromTester-rf.lastSnapshotIndex].Term
+
+	// Create a copy of the relevant part of the log
+	// Update the snapshot and snapshot index
+
+	prevNextIndex := rf.log[0].Index
+
+	// Replace the old log with the new one
+	rf.CondInstallSnapshot(term, commitIndexFromTester, snapshot)
+
+	if rf.serverRole == LEADER {
+		for server := range rf.peers {
+			if rf.me != server {
+				rf.nextIndex[server] = rf.nextIndex[server] - (rf.lastSnapshotIndex - prevNextIndex)
+			}
+		}
+	}
+
+}
+
+// --------------------------- Main Functions  --------------------------------- //
 
 func (rf *Raft) ticker() {
 	// Initialize the timer with a randomized election timeout
@@ -660,24 +604,14 @@ func (rf *Raft) ticker() {
 
 		case <-rf.electionTimer.C:
 			// Election timeout occurred, start an election
-			rf.mu.Lock()
-			isLeader := rf.serverRole == LEADER
-
-			rf.mu.Unlock()
-			if !isLeader {
-				go rf.startElection() // Start a new election
-			}
+			go rf.startElection() // Start a new election
 		}
 	}
 }
-
 func (rf *Raft) startElection() {
 	defer rf.deferLogging("REQUEST_VOTES", "StartElection", rf.me, time.Now(), "")
 
 	rf.mu.Lock()
-	//close(rf.cancelElection)                // Close the existing election first.
-	//rf.cancelElection = make(chan struct{}) // Reinitialize the cancellation channel
-
 	rf.lg.DPrintf("🚀🚀🚀🚀🚀🚀🚀 [Start Election] | Node: %d | Term: %d | timeNow :%s", rf.me, rf.currentTerm+1, time.Now().String())
 
 	rf.updateToCandidateRole(fmt.Sprintf("Term: %d", rf.currentTerm+1))
@@ -702,36 +636,43 @@ func (rf *Raft) startElection() {
 		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "[CLOSED_VOTING_CHANNEL][REQUEST_VOTE][Term: %d]", rf.currentTerm)
 	}()
 
-	go rf.countVotes(voteCh, currentTerm)
-}
-func (rf *Raft) countVotes(voteCh <-chan bool, currentTerm int) {
-	defer rf.deferLogging("RequestVote", "COUNT_VOTES", rf.me, time.Now(), "")
+	grantedVotes := 1
 
-	grantedVotes := 1 // Start with self-vote
-	for vote := range voteCh {
-		if vote {
-			grantedVotes++
-			rf.lg.DPrintf("[Vote Granted] | Node: %d | Current Votes: %d, quorumSize: %d", rf.me, grantedVotes, rf.quorumSize)
-		}
-		if grantedVotes >= rf.quorumSize {
-			rf.mu.Lock()
-			if rf.currentTerm == currentTerm && rf.serverRole == CANDIDATE {
-				rf.updateToLeaderRole()
-				rf.mu.Unlock()
-				rf.lg.DPrintf("👑 [New Leader Elected] | Node: %d | Term: %d", rf.me, rf.currentTerm)
+	go func() {
+		defer rf.deferLogging("COUNT_VOTES", "CountVotes ACKs", rf.me, time.Now(), "")
 
-				go rf.startAgreement()
-			} else {
-				rf.mu.Unlock()
+		for {
+			select {
+			case vote := <-voteCh:
+				if vote {
+					grantedVotes++
+					rf.lg.DPrintf("[Vote Granted] | Node: %d | Current Votes: %d, quorumSize: %d", rf.me, grantedVotes, rf.quorumSize)
+				}
+				if grantedVotes >= rf.quorumSize {
+					rf.mu.Lock()
+					if rf.currentTerm == currentTerm && rf.serverRole == CANDIDATE {
+						rf.updateToLeaderRole()
+						rf.mu.Unlock()
+						rf.lg.DPrintf("👑 [New Leader Elected] | Node: %d | Term: %d", rf.me, rf.currentTerm)
+
+						go rf.startAgreement()
+					} else {
+						rf.mu.Unlock()
+					}
+				}
+			case <-rf.killCh:
+				return
+			case <-rf.cancelElection:
+				return
 			}
 		}
-	}
+	}()
 }
+
 func (rf *Raft) sendRequestVote(peerIndex int, term int, voteCh chan<- bool, wg *sync.WaitGroup) {
 	id := generateRequestID()
-
-	defer rf.deferLogging("SendRequestVoteEachServer", "RPC PROCESS REQUEST", peerIndex, time.Now(), id)
 	defer wg.Done()
+	defer rf.deferLogging("SendRequestVoteEachServer", "RPC PROCESS REQUEST", peerIndex, time.Now(), id)
 
 	rf.mu.Lock()
 	lastLogIndex, lastLogTerm := rf.lastLogTermIndex()
@@ -742,30 +683,20 @@ func (rf *Raft) sendRequestVote(peerIndex int, term int, voteCh chan<- bool, wg 
 		LastLogIndex: lastLogIndex,
 		RequestId:    id,
 	}
+	isCandidate := rf.serverRole == CANDIDATE
+
 	rf.mu.Unlock()
 
 	var requestVoteReply RequestVoteReply
-	doneChan := make(chan bool, 1)
 
-	go func() {
-		rf.mu.Lock()
-		isCandidate := rf.serverRole == CANDIDATE
-		rf.mu.Unlock()
-		if isCandidate {
-			rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole),
-				"[REQUEST][REQUEST_VOTE][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-					"%d --> %d, nextIndx: [%d]", rf.currentTerm, requestVoteArgs.LastLogIndex, requestVoteArgs.LastLogTerm, rf.commitIndex,
-				rf.me, peerIndex, rf.nextIndex)
-			ok := rf.peers[peerIndex].CallWithVClock(rf.me, "Raft.RequestVote", &requestVoteArgs, &requestVoteReply)
-			doneChan <- ok
-		} else {
-			doneChan <- false
-		}
+	if isCandidate {
+		rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole),
+			"[REQUEST][REQUEST_VOTE][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, nextIndx: [%d]", rf.currentTerm, requestVoteArgs.LastLogIndex, requestVoteArgs.LastLogTerm, rf.commitIndex,
+			rf.me, peerIndex, rf.nextIndex)
 
-	}()
+		ok := rf.peers[peerIndex].CallWithVClock(rf.me, "Raft.RequestVote", &requestVoteArgs, &requestVoteReply)
 
-	select {
-	case ok := <-doneChan:
 		if !ok {
 			rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole),
 				"[REQUEST][REQUEST_VOTE_FAILURE][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
@@ -782,21 +713,314 @@ func (rf *Raft) sendRequestVote(peerIndex int, term int, voteCh chan<- bool, wg 
 
 			rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole), "[REQUEST_VOTE_ACK][STEPPING_DOWN_TO_FOLLOWER][SUCCESS][Term: %d] from serverId: [%d]  "+
 				"", rf.currentTerm)
-		} else if requestVoteReply.VoteGranted && rf.currentTerm == requestVoteReply.Term {
-			rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole), "[REQUEST_VOTE_ACK][REQUEST_VOTE_GRANTED][SUCCESS][Term: %d] from serverId: [%d] "+
-				"", rf.currentTerm, peerIndex)
+		} else if requestVoteReply.VoteGranted && rf.currentTerm == requestVoteReply.Term && rf.serverRole == CANDIDATE && rf.currentTerm == requestVoteArgs.Term {
 			voteCh <- true
-		} else {
-			rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole), "[REQUEST_VOTE_ACK][REPLY_TERM_IS_SMALL_IGNORE_DEBUG][SUCCESS][Term: %d][responseTerm: %d] from serverId: [%d] "+
-				"", term, rf.currentTerm, peerIndex)
 		}
 
 		rf.mu.Unlock()
 		return
-	case <-time.After(REQUEST_VOTE_RPC_CALLS_TIMEOUT):
-		rf.lg.DPrintfId(id, rf.me, serverRoleToStr(rf.serverRole), "[REQUEST_VOTE_RPC_CALLS_TIMEOUT][REQUEST_VOTE][Term: %d] from serverId: [%d] "+
-			"", rf.currentTerm, peerIndex)
+	}
+}
+
+func (rf *Raft) startAgreement() {
+	successCh := make(chan int, len(rf.peers)-1) // Channel for successful append entries
+	defer rf.deferLogging("APPEND_ENTRIES", "startAgreement", rf.me, time.Now(), "")
+
+	// Start a dedicated goroutine for each peer except self
+	for server := range rf.peers {
+		if rf.me != server {
+			//go rf.sendHeartbeats(server, successCh)
+			go rf.sendAppendEntriesToPeer(server, successCh)
+		}
+	}
+
+	go func() {
+		defer rf.deferLogging("APPEND_ENTRIES", "CountAppendEntries ACKs", rf.me, time.Now(), "")
+
+		for {
+			select {
+			case index := <-successCh:
+				rf.handleSuccessAgreement(index)
+			case <-rf.killCh:
+				return
+			case <-rf.stopLeader:
+				// Exit if no longer leader
+				return
+			}
+		}
+	}()
+}
+func (rf *Raft) sendAppendEntriesToPeer(server int, successCh chan<- int) {
+	defer rf.deferLogging("APPEND_ENTRIES", "SendAppendEntriesToPeer", server, time.Now(), "")
+	for {
+		select {
+		case <-rf.stopLeader:
+			return
+		case <-rf.killCh:
+			return
+		default: // Non-blocking case to avoid stalling the loop
+			go rf.callAppendEntries(server, successCh)
+			time.Sleep(APPEND_ENTRIES_CALLS_FREQ) // Adjust delay as needed
+		}
+	}
+}
+func (rf *Raft) callAppendEntries(server int, successCh chan<- int) {
+
+	rf.mu.Lock()
+	nextIndex := rf.nextIndex[server]
+	currentTerm := rf.currentTerm
+	cmtIndex := rf.commitIndex
+	lastSnapShotIndex := rf.lastSnapshotIndex
+	//nextIndexAdjust := nextIndexRaw - rf.lastSnapshotIndex
+
+	var entries []Log
+	var typeOfRPC string
+	//var rpcTimout time.Duration
+	//if heartbeat {
+	//	entries = []Log{}
+	//	typeOfRPC = "HeartBeat"
+	//	rpcTimout = APPEND_ENTRIES_HEARTBEAT_RPC_CALLS_TIMEOUT
+	//} else {
+
+	//if nextIndex >= len(rf.log) {
+	//	rf.mu.Unlock()
+	//	return
+	//}
+
+	if nextIndex <= 0 {
+		rf.mu.Unlock()
+		rf.sendSnapshot(server)
 		return
+	}
+
+	entries = rf.log[nextIndex:]
+	typeOfRPC = "AppendEntries"
+	//rpcTimout = APPEND_ENTRIES_RPC_CALLS_TIMEOUT
+	//if len(entries) == 0 {
+	//	rf.mu.Unlock()
+	//	return
+	//}
+	//}
+	defer rf.deferLogging(typeOfRPC, "callAppendEntries", server, time.Now(), "")
+
+	//prevLogIndexAdjust := nextIndexAdjust - 1
+
+	prevLogIndex := nextIndex - 1
+
+	var prevLogIndxArg int
+	var prevLogArgTermArg int
+
+	if prevLogIndex < 0 {
+		prevLogIndxArg = prevLogIndex
+		prevLogArgTermArg = -1
+	} else {
+		prevLogIndxArg = rf.log[prevLogIndex].Index
+		prevLogArgTermArg = rf.log[prevLogIndex].Term
+	}
+
+	requestId := generateRequestID()
+
+	args := AppendEntriesArgs{
+		Term:         currentTerm,
+		LeaderId:     rf.me,
+		PrevLogIndex: prevLogIndxArg,
+		PrevLogTerm:  prevLogArgTermArg,
+		LogEntries:   entries,
+		LeaderCommit: cmtIndex,
+		RequestId:    requestId,
+	}
+
+	isLeader := rf.serverRole == LEADER
+
+	rf.mu.Unlock()
+
+	var reply AppendEntriesReply
+
+	//go func() {
+	//	//ctx, cancel := context.WithTimeout(context.Background(), rpcTimout)
+	//	//defer cancel()
+	//
+	//	rf.mu.Lock()
+	//	isLeader := rf.serverRole == LEADER
+	//	rf.mu.Unlock()
+	//	if isLeader {
+	//		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole),
+	//			"[REQUEST][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+	//				"%d --> %d, entries to send: [%d], nextIndx: [%d]", typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, args.LogEntries, rf.nextIndex)
+	//
+	//		select {
+	//		case <-rf.stopLeader:
+	//			//cancel() // Cancel the context when stepping down
+	//			return
+	//		//case <-ctx.Done():
+	//		//	return
+	//		default:
+	//			doneChan <- rf.peers[server].CallWithVClock(rf.me, "Raft.AppendEntries", &args, &reply)
+	//		}
+	//	}
+	//}()
+
+	if isLeader {
+		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole),
+			"[REQUEST][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, entries to send: [%d], nextIndx: [%d]", typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, args.LogEntries, rf.nextIndex)
+
+		ok := rf.peers[server].CallWithVClock(rf.me, "Raft.AppendEntries", &args, &reply)
+		if !ok {
+			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[FAILURE-ACK][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
+				typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
+			return
+		}
+
+		rf.mu.Lock()
+
+		if reply.Term < rf.currentTerm {
+			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[STALE-RETURN][%s][Term: %d][StaleTerm: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
+				typeOfRPC, rf.currentTerm, reply.Term, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
+			rf.mu.Unlock()
+			return
+		}
+
+		if reply.Term > rf.currentTerm {
+			rf.updateToFollowerRoleAndCatchUpNewTerm(reply.Term, args.RequestId)
+			rf.mu.Unlock()
+			return
+		}
+
+		rf.resetElectionTimer("")
+
+		if reply.Success {
+			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[SUCCESS][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
+				typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
+
+			nextIndxAfterRPC := rf.nextIndex[server]
+			snapShotDiff := rf.lastSnapshotIndex - lastSnapShotIndex
+
+			calculatedNextIndex := (prevLogIndex + len(args.LogEntries) + 1) - snapShotDiff
+			newMatchIndex := rf.log[calculatedNextIndex-1].Index
+
+			monotonicallyIncreasing := calculatedNextIndex > nextIndxAfterRPC
+
+			if monotonicallyIncreasing {
+				rf.nextIndex[server] = calculatedNextIndex
+				rf.matchIndex[server] = newMatchIndex
+			}
+
+			indx := rf.matchIndex[server]
+
+			// Update commit index
+			rf.mu.Unlock()
+
+			if monotonicallyIncreasing {
+				successCh <- indx
+			}
+
+			return
+		}
+
+		// Handle the case where AppendEntries fails due to log inconsistency
+		if reply.XTerm == -1 {
+			// No specific term was found, fallback to decrement or set to XLen
+			xLen := rf.getIndexAddOffset(reply.XLen, false)
+			if xLen < 0 {
+				rf.nextIndex[server] = xLen
+			} else {
+				rf.nextIndex[server] = maxR(1, xLen)
+			}
+		} else {
+			lastIndexForXTerm := rf.findLastIndexForTerm(reply.XTerm)
+			if lastIndexForXTerm == -1 {
+				// Leader does not have XTerm, set nextIndex to XIndex
+				rf.nextIndex[server] = rf.getIndexAddOffset(reply.XIndex, false)
+			} else {
+				// Leader has XTerm, set nextIndex to the last index for XTerm + 1
+				rf.nextIndex[server] = lastIndexForXTerm + 1
+			}
+		}
+
+		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[MISMATCH][FAILED][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+			"%d --> %d, decrement nextIndex %d, [XTerm: %d, XIndx: %d, XLen: %d]", typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, reply.XTerm, reply.XIndex, reply.XLen)
+		rf.mu.Unlock()
+		return
+	}
+
+}
+func (rf *Raft) sendSnapshot(server int) {
+	rf.mu.Lock()
+
+	// Prepare the snapshot data to be sent
+	args := InstallSnapshotArgs{
+		Term:              rf.currentTerm,
+		LeaderID:          rf.me,
+		LastIncludedIndex: rf.lastSnapshotIndex,
+		LastIncludedTerm:  rf.lastSnapshotTerm,
+		SnapShot:          rf.persister.ReadSnapshot(),
+	}
+
+	rf.mu.Unlock()
+	// Create a reply object
+	reply := InstallSnapshotReply{}
+	doneChan := make(chan bool, 1)
+
+	go func() {
+		rf.mu.Lock()
+		isLeader := rf.serverRole == LEADER
+		rf.mu.Unlock()
+		if isLeader {
+			rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "[REQUEST][Snapshot][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
+				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
+				rf.currentTerm, args.LastIncludedIndex, args.LastIncludedTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
+
+			ok := rf.peers[server].CallWithVClock(rf.me, "Raft.InstallSnapshot", &args, &reply)
+			doneChan <- ok
+		}
+	}()
+
+	select {
+	case ok := <-doneChan:
+		if !ok {
+			// Log failure or handle retries
+			rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Failed to send snapshot to server %d", server)
+			return // Indicates failure to send the snapshot
+		}
+
+		rf.mu.Lock()
+
+		// Check if the follower's term is greater than the leader's term
+		if reply.Term > rf.currentTerm {
+			rf.updateToFollowerRoleAndCatchUpNewTerm(reply.Term, "")
+			rf.mu.Unlock()
+			return // Indicates that the current server is no longer a leader
+		}
+
+		// Snapshot successfully installed, update nextIndex and matchIndex
+		rf.nextIndex[server] = rf.getIndexAddOffset(args.LastIncludedIndex+1, false)
+		rf.matchIndex[server] = args.LastIncludedIndex
+
+		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Snapshot successfully sent to server %d, nextIndex set to %d", server, rf.nextIndex[server])
+
+		rf.mu.Unlock()
+		return
+		//case <-time.After(APPEND_ENTRIES_RPC_CALLS_TIMEOUT):
+		//	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "[SNAPSHOT][TIMED_OUT][APPEND_SNAPSHOT][Term: %d] from serverId: [%d] "+
+		//		"", rf.currentTerm, server)
+		//	return
+	}
+
+	return // Success
+}
+func (rf *Raft) applyLogEntriesPeriodically() {
+	for {
+		select {
+		case <-rf.killCh:
+			return // Exit the loop if a kill signal is received
+		default:
+			time.Sleep(APPLYING_LOGS_AND_PERSIST_FREQ)
+			rf.applyLogEntriesToStateMachine()
+		}
 	}
 }
 
@@ -868,7 +1092,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.resetElectionTimer(args.RequestId)
 
 	// Ensure that you follow the second rule in “Rules for Servers” before handling an incoming RPC. The second rule states:
-	if rf.currentTerm < args.Term {
+	if rf.currentTerm < args.Term || (rf.currentTerm == args.Term && rf.serverRole == CANDIDATE) {
 		reply.Term = args.Term
 		rf.updateToFollowerRoleAndCatchUpNewTerm(args.Term, args.RequestId)
 		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "Got heartbeat from the new term: [%d], leader %d\n", rf.currentTerm, args.LeaderId)
@@ -944,345 +1168,87 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[Term: %d] Updating commit Indx of follower from %d to %d", rf.currentTerm, beforeTerm, rf.commitIndex)
 	}
 
+	rf.resetElectionTimer(args.RequestId)
+
 }
 
-// --------------------------- CMD/Logs Agreement  --------------------------------- //
-
-func (rf *Raft) startAgreement() {
-	successCh := make(chan int, len(rf.peers)-1) // Channel for successful append entries
-	defer rf.deferLogging("APPEND_ENTRIES", "startAgreement", rf.me, time.Now(), "")
-
-	// Start a dedicated goroutine for each peer except self
-	for server := range rf.peers {
-		if rf.me != server {
-			//go rf.sendHeartbeats(server, successCh)
-			go rf.sendAppendEntriesToPeer(server, successCh)
-		}
-	}
-
-	go func() {
-		defer rf.deferLogging("APPEND_ENTRIES", "CountAppendEntries ACKs", rf.me, time.Now(), "")
-
-		for {
-			select {
-			case index := <-successCh:
-				rf.handleSuccessAgreement(index)
-			case <-rf.killCh:
-				return
-			case <-rf.stepDownFromLeader:
-				// Exit if no longer leader
-				return
-			}
-		}
-	}()
-}
-
-func (rf *Raft) sendAppendEntriesToPeer(server int, successCh chan<- int) {
-	defer rf.deferLogging("APPEND_ENTRIES", "SendAppendEntriesToPeer", server, time.Now(), "")
-	for {
-		select {
-		case <-rf.stepDownFromLeader:
-			return
-		case <-rf.killCh:
-			return
-		default: // Non-blocking case to avoid stalling the loop
-			rf.callAppendEntries(server, false, successCh)
-			time.Sleep(APPEND_ENTRIES_CALLS_FREQ) // Adjust delay as needed
-		}
-	}
-}
-
-//func (rf *Raft) sendHeartbeats(server int, successCh chan<- int) {
-//	defer rf.deferLogging("HEART_BEAT", "SendHeartBeatsToPeer", server, time.Now(), "")
+// Start the service using Raft (e.g. a k/v server) wants to start
+// agreement on the next command to be appended to Raft's log. if this
+// server isn't the leader, returns false. otherwise start the
+// agreement and return immediately. there is no guarantee that this
+// command will ever be committed to the Raft log, since the leader
+// may fail or lose an election. even if the Raft instance has been killed,
+// this function should return gracefully.
 //
-//	for {
-//		select {
-//		case <-rf.stepDownFromLeader:
-//			return // Exit if no longer leader
-//		case <-rf.killCh:
-//			return // Exit if the system is shutting down
-//		default:
-//			go rf.callAppendEntries(server, true, successCh)
-//			time.Sleep(HEARTBEAT_INTERVAL)
-//		}
-//	}
-//}
-
-func (rf *Raft) callAppendEntries(server int, heartbeat bool, successCh chan<- int) {
-
+// the first return value is the index that the command will appear at
+// if it's ever committed. the second return value is the current
+// term. the third return value is true if this server believes it is
+// the leader
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-	nextIndex := rf.nextIndex[server]
-	//nextIndexAdjust := nextIndexRaw - rf.lastSnapshotIndex
+	defer rf.deferLogging("[InstallSnapshot]", "Snapshot", rf.me, time.Now(), "")
 
-	var entries []Log
-	var typeOfRPC string
-	var rpcTimout time.Duration
-	//if heartbeat {
-	//	entries = []Log{}
-	//	typeOfRPC = "HeartBeat"
-	//	rpcTimout = APPEND_ENTRIES_HEARTBEAT_RPC_CALLS_TIMEOUT
-	//} else {
+	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Got InstallSnapshot for the new term: [%d], leader %d\n", rf.currentTerm, args.LeaderID)
+	reply.Term = rf.currentTerm
 
-	//if nextIndex >= len(rf.log) {
-	//	rf.mu.Unlock()
-	//	return
-	//}
-
-	if nextIndex <= 0 {
+	// Update term if necessary
+	if args.Term < rf.currentTerm {
 		rf.mu.Unlock()
-		rf.sendSnapshot(server)
 		return
 	}
 
-	entries = rf.log[nextIndex:]
-	typeOfRPC = "AppendEntries"
-	rpcTimout = APPEND_ENTRIES_RPC_CALLS_TIMEOUT
-	//if len(entries) == 0 {
-	//	rf.mu.Unlock()
-	//	return
-	//}
-	//}
-	defer rf.deferLogging(typeOfRPC, "callAppendEntries", server, time.Now(), "")
+	// Ensure that you follow the second rule in “Rules for Servers” before handling an incoming RPC. The second rule states:
+	if rf.currentTerm < args.Term || rf.serverRole != FOLLOWER {
+		reply.Term = args.Term
+		rf.updateToFollowerRoleAndCatchUpNewTerm(args.Term, "")
+	}
 
-	//prevLogIndexAdjust := nextIndexAdjust - 1
+	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Got something from leader install snapshot "+
+		"WithOffset: [logLen: %d, argsPrevIndex: %d, argsPrevTerm: %d, lastSnapShotIndex: %d, logs: %d]\n", len(rf.log), args.LastIncludedIndex,
+		args.LastIncludedTerm, rf.lastSnapshotIndex, rf.log)
 
-	prevLogIndex := nextIndex - 1
+	if args.LastIncludedIndex <= rf.lastApplied || rf.lastSnapshotIndex >= args.LastIncludedIndex {
+		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Install snapshot not valid: [argsLastIncluded: %d, lastApplied: %d], "+
+			"other condition [LastSnapshot index: %d, lastIncludedIndex :%D\n", args.LastIncludedIndex,
+			rf.lastApplied, rf.lastSnapshotIndex, args.LastIncludedIndex)
 
-	var prevLogIndxArg int
-	var prevLogArgTermArg int
+		rf.mu.Unlock()
+		return
+	}
 
-	if prevLogIndex < 0 {
-		prevLogIndxArg = prevLogIndex
-		prevLogArgTermArg = -1
+	start := args.LastIncludedIndex - rf.lastSnapshotIndex
+	if start >= len(rf.log) {
+		rf.log = []Log{{
+			Term:    args.LastIncludedTerm,
+			Index:   args.LastIncludedIndex,
+			Command: nil,
+		}}
 	} else {
-		prevLogIndxArg = rf.log[prevLogIndex].Index
-		prevLogArgTermArg = rf.log[prevLogIndex].Term
+		rf.log = rf.log[start:]
+		rf.log[0].Index = args.LastIncludedIndex
+		rf.log[0].Term = args.LastIncludedTerm
 	}
 
-	requestId := generateRequestID()
+	rf.lastSnapshotIndex = args.LastIncludedIndex
+	rf.lastSnapshotTerm = args.LastIncludedTerm
+	rf.lastApplied = maxR(rf.lastSnapshotIndex, rf.lastApplied)
 
-	args := AppendEntriesArgs{
-		Term:         rf.currentTerm,
-		LeaderId:     rf.me,
-		PrevLogIndex: prevLogIndxArg,
-		PrevLogTerm:  prevLogArgTermArg,
-		LogEntries:   entries,
-		LeaderCommit: rf.commitIndex,
-		RequestId:    requestId,
-	}
+	rf.persister.SaveStateAndSnapshot(rf.getRaftStatePersistData(), args.SnapShot)
 
+	rf.resetElectionTimer("")
 	rf.mu.Unlock()
 
-	var reply AppendEntriesReply
-
-	doneChan := make(chan bool, 1)
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), rpcTimout)
-		defer cancel()
-
-		rf.mu.Lock()
-		isLeader := rf.serverRole == LEADER
-		rf.mu.Unlock()
-		if isLeader {
-			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole),
-				"[REQUEST][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-					"%d --> %d, entries to send: [%d], nextIndx: [%d]", typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, args.LogEntries, rf.nextIndex)
-
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				doneChan <- rf.peers[server].CallWithVClock(rf.me, "Raft.AppendEntries", &args, &reply)
-			}
-		}
-	}()
-
-	select {
-	case ok := <-doneChan:
-		if !ok {
-			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[FAILURE-ACK][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
-				typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
-			return
-		}
-
-		rf.mu.Lock()
-
-		if reply.Term > rf.currentTerm {
-			rf.updateToFollowerRoleAndCatchUpNewTerm(reply.Term, args.RequestId)
-			rf.mu.Unlock()
-			return
-		}
-
-		if reply.Success {
-			rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[SUCCESS][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
-				typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
-
-			//if heartbeat {
-			//	rf.mu.Unlock()
-			//	return
-			//}
-
-			// Success means you have appended something in the follower
-			// Snapshot in between and changes this nextIndex to -2?
-			beforeNextIndx := rf.nextIndex[server]
-			newNextIndex := prevLogIndex + len(args.LogEntries) + 1
-			newMatchIndex := rf.log[newNextIndex-1].Index
-
-			monotonicallyIncreasing := newNextIndex > beforeNextIndx
-
-			if monotonicallyIncreasing {
-				rf.nextIndex[server] = newNextIndex
-				rf.matchIndex[server] = newMatchIndex
-			}
-
-			indx := rf.matchIndex[server]
-
-			// Update commit index
-			rf.mu.Unlock()
-
-			if monotonicallyIncreasing {
-				successCh <- indx
-			}
-
-			return
-		}
-
-		// Handle the case where AppendEntries fails due to log inconsistency
-		if reply.XTerm == -1 {
-			// No specific term was found, fallback to decrement or set to XLen
-			xLen := rf.getIndexAddOffset(reply.XLen, false)
-			if xLen < 0 {
-				rf.nextIndex[server] = xLen
-			} else {
-				rf.nextIndex[server] = maxR(1, xLen)
-			}
-		} else {
-			lastIndexForXTerm := rf.findLastIndexForTerm(reply.XTerm)
-			if lastIndexForXTerm == -1 {
-				// Leader does not have XTerm, set nextIndex to XIndex
-				rf.nextIndex[server] = rf.getIndexAddOffset(reply.XIndex, false)
-			} else {
-				// Leader has XTerm, set nextIndex to the last index for XTerm + 1
-				rf.nextIndex[server] = lastIndexForXTerm + 1
-			}
-		}
-
-		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[MISMATCH][FAILED][%s][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-			"%d --> %d, decrement nextIndex %d, [XTerm: %d, XIndx: %d, XLen: %d]", typeOfRPC, rf.currentTerm, args.PrevLogIndex, args.PrevLogTerm, rf.commitIndex, rf.me, server, rf.nextIndex, reply.XTerm, reply.XIndex, reply.XLen)
-		rf.mu.Unlock()
-		return
-	case <-time.After(rpcTimout):
-		rf.lg.DPrintfId(args.RequestId, rf.me, serverRoleToStr(rf.serverRole), "[REQUEST_VOTE_RPC_CALLS_TIMEOUT][REQUEST_VOTE][Term: %d] from serverId: [%d] "+
-			"", rf.currentTerm, server)
-		return
-
+	rf.applyToStateMachine <- ApplyMsg{
+		SnapshotValid: true,
+		Snapshot:      args.SnapShot,
+		SnapshotTerm:  args.LastIncludedTerm,
+		SnapshotIndex: args.LastIncludedIndex,
 	}
 
-}
+	//// Use CondInstallSnapshot to decide if the snapshot should be applied
+	//if !rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.SnapShot) {
+	//	rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), " Snapshot is not newer than the current state Term: [%d], leader %d\n", rf.currentTerm, args.LeaderID)
+	//	return // Snapshot is not newer than the current state
+	//}
 
-func (rf *Raft) sendSnapshot(server int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	// Prepare the snapshot data to be sent
-	args := InstallSnapshotArgs{
-		Term:              rf.currentTerm,
-		LeaderID:          rf.me,
-		LastIncludedIndex: rf.lastSnapshotIndex,
-		LastIncludedTerm:  rf.lastSnapshotTerm,
-		SnapShot:          rf.persister.ReadSnapshot(),
-	}
-
-	// Create a reply object
-	reply := InstallSnapshotReply{}
-	doneChan := make(chan bool, 1)
-
-	go func() {
-		rf.mu.Lock()
-		isLeader := rf.serverRole == LEADER
-		rf.mu.Unlock()
-		if isLeader {
-			rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "[REQUEST][Snapshot][AppendEntries][Term: %d][PrevLogIndex :%d][PrevLogTerm :%d][commitIndx: %d] "+
-				"%d --> %d, Update nextIndex %d matchIndx :%d and commitIndx %d",
-				rf.currentTerm, args.LastIncludedIndex, args.LastIncludedTerm, rf.commitIndex, rf.me, server, rf.nextIndex, rf.matchIndex, rf.commitIndex)
-
-			ok := rf.peers[server].CallWithVClock(rf.me, "Raft.InstallSnapshot", &args, &reply)
-			doneChan <- ok
-		}
-	}()
-
-	select {
-	case ok := <-doneChan:
-		if !ok {
-			// Log failure or handle retries
-			rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Failed to send snapshot to server %d", server)
-			return // Indicates failure to send the snapshot
-		}
-
-		rf.mu.Lock()
-
-		// Check if the follower's term is greater than the leader's term
-		if reply.Term > rf.currentTerm {
-			rf.updateToFollowerRoleAndCatchUpNewTerm(reply.Term, "")
-			rf.mu.Unlock()
-			return // Indicates that the current server is no longer a leader
-		}
-
-		// Snapshot successfully installed, update nextIndex and matchIndex
-		rf.nextIndex[server] = rf.getIndexAddOffset(args.LastIncludedIndex+1, false)
-		rf.matchIndex[server] = args.LastIncludedIndex
-
-		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "Snapshot successfully sent to server %d, nextIndex set to %d", server, rf.nextIndex[server])
-
-		rf.mu.Unlock()
-		return
-	case <-time.After(APPEND_ENTRIES_RPC_CALLS_TIMEOUT * 2):
-		rf.lg.DPrintfId("", rf.me, serverRoleToStr(rf.serverRole), "[SNAPSHOT][TIMED_OUT][APPEND_SNAPSHOT][Term: %d] from serverId: [%d] "+
-			"", rf.currentTerm, server)
-		return
-	}
-
-	return // Success
-}
-
-func (rf *Raft) handleSuccessAgreement(index int) {
-	rf.mu.Lock()
-	indx := rf.getIndexAddOffset(index, false)
-
-	if index > rf.commitIndex {
-		count := 1
-		for _, matchIdx := range rf.matchIndex {
-			if matchIdx >= index {
-				count++
-			}
-		}
-		if count >= rf.quorumSize && rf.log[indx].Term == rf.currentTerm {
-			rf.commitIndex = index
-			rf.lg.DPrintfId(fmt.Sprintf("MatchIndex: %d", indx), rf.me, serverRoleToStr(rf.serverRole), "[COMMIT--INDEX][commitIndx: %d] commit index updated", rf.commitIndex)
-
-			rf.persist()
-
-		}
-	}
-
-	rf.mu.Unlock()
-}
-
-func (rf *Raft) applyLogEntriesPeriodically() {
-	for {
-		select {
-		case <-rf.killCh:
-			return // Exit the loop if a kill signal is received
-		default:
-			time.Sleep(APPLYING_LOGS_AND_PERSIST_FREQ)
-			rf.applyLogEntriesToStateMachine()
-		}
-	}
-}
-
-func generateRequestID() string {
-	return fmt.Sprintf("%d", time.Now().Unix())
 }

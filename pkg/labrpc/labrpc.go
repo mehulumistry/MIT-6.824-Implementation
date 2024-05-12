@@ -594,6 +594,8 @@ func MakeService(rcvr interface{}) *Service {
 	return svc
 }
 
+const DEBUG = false
+
 func (svc *Service) dispatch(methname string, req reqMsg, to string, clockFrom *govec.GoLog, clockTo *govec.GoLog) replyMsg {
 	if method, ok := svc.methods[methname]; ok {
 		// prepare space into which to read the argument.
@@ -615,9 +617,12 @@ func (svc *Service) dispatch(methname string, req reqMsg, to string, clockFrom *
 		replyv := reflect.New(replyType)
 
 		messagePayload := []byte("")
-		vectorClockMessage := clockFrom.PrepareSend(fmt.Sprintf("Sending Messaage %s from: %d to %s, payload: %+v", methname,
-			req.me, to, args.Elem()), messagePayload, govec.GetDefaultLogOptions())
-		clockTo.UnpackReceive(fmt.Sprintf("Receiving Messaage: %s", methname), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+
+		if DEBUG {
+			vectorClockMessage := clockFrom.PrepareSend(fmt.Sprintf("Sending Messaage %s from: %d to %s, payload: %+v", methname,
+				req.me, to, args.Elem()), messagePayload, govec.GetDefaultLogOptions())
+			clockTo.UnpackReceive(fmt.Sprintf("Receiving Messaage: %s", methname), vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+		}
 
 		// call the method.
 		function := method.Func
@@ -634,11 +639,14 @@ func (svc *Service) dispatch(methname string, req reqMsg, to string, clockFrom *
 		//}
 		//printValue("decode", replyv.Interface())
 
-		messagePayloadACK := []byte("")
-		vectorClockMessageACK := clockTo.PrepareSend(fmt.Sprintf("Sending Messaage ACK: %s, from: %d to %s, payload: %+v",
-			methname, req.me, to, replyv.Interface()), messagePayloadACK, govec.GetDefaultLogOptions())
-		clockFrom.UnpackReceive(fmt.Sprintf("Receiving ACK Messaage: %s, from %d to %s", methname, req.me, to),
-			vectorClockMessageACK, &messagePayloadACK, govec.GetDefaultLogOptions())
+		if DEBUG {
+			messagePayloadACK := []byte("")
+			vectorClockMessageACK := clockTo.PrepareSend(fmt.Sprintf("Sending Messaage ACK: %s, from: %d to %s, payload: %+v",
+				methname, req.me, to, replyv.Interface()), messagePayloadACK, govec.GetDefaultLogOptions())
+			clockFrom.UnpackReceive(fmt.Sprintf("Receiving ACK Messaage: %s, from %d to %s", methname, req.me, to),
+				vectorClockMessageACK, &messagePayloadACK, govec.GetDefaultLogOptions())
+
+		}
 
 		return replyMsg{true, rb.Bytes()}
 	} else {
