@@ -641,9 +641,9 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 	for time.Since(t0).Seconds() < 10 && cfg.checkFinished() == false {
 		// try all the servers, maybe one is the leader.
 		index := -1
-		var vectorClockMessage []byte
-		messagePayload := []byte("")
-		var toLogger *govec.GoLog
+		//var vectorClockMessage []byte
+		//messagePayload := []byte("")
+		//var toLogger *govec.GoLog
 
 		for si := 0; si < cfg.n; si++ {
 			starts = (starts + 1) % cfg.n
@@ -655,16 +655,16 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			cfg.mu.Unlock()
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
-				toLogger = cfg.net.GetVClock(starts)
+				//toLogger = cfg.net.GetVClock(starts)
 
-				if Debug {
-					vectorClockMessage = cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s][Role: %s]Sending CMD %v from: %s to %d, Index: %d",
-						time.Now().String(), serverRoleToStr(rf.serverRole), cmd,
-						"tester", starts, index1), messagePayload, govec.GetDefaultLogOptions())
-					toLogger.UnpackReceive(fmt.Sprintf("[time: %s][Role: %s]Receiving Messaage in tester: %v", time.Now().String(), serverRoleToStr(rf.serverRole), cmd),
-						vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
-
-				}
+				//if Debug {
+				//	vectorClockMessage = cfg.testerVClock.PrepareSend(fmt.Sprintf("[time: %s][Role: %s]Sending CMD %v from: %s to %d, Index: %d",
+				//		time.Now().String(), serverRoleToStr(rf.serverRole), cmd,
+				//		"tester", starts, index1), messagePayload, govec.GetDefaultLogOptions())
+				//	toLogger.UnpackReceive(fmt.Sprintf("[time: %s][Role: %s]Receiving Messaage in tester: %v", time.Now().String(), serverRoleToStr(rf.serverRole), cmd),
+				//		vectorClockMessage, &messagePayload, govec.GetDefaultLogOptions())
+				//
+				//}
 
 				if ok {
 					index = index1
