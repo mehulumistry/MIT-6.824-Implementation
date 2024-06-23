@@ -49,6 +49,7 @@ func TestStaticShards5A(t *testing.T) {
 	// make sure that the data really is sharded by
 	// shutting down one shard and checking that some
 	// Get()s don't succeed.
+	DPrintf("Shutting down group: 1")
 	cfg.ShutdownGroup(1)
 	cfg.checklogs() // forbid snapshots
 

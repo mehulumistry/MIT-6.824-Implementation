@@ -11,24 +11,25 @@ import (
 
 func check(t *testing.T, groups []int, ck *Clerk) {
 	c := ck.Query(-1)
+
 	if len(c.Groups) != len(groups) {
-		t.Fatalf("wanted %v groups, got %v", len(groups), len(c.Groups))
+		t.Fatalf("Incorrect number of groups: expected %v, got %v in config: %+v", len(groups), len(c.Groups), c)
 	}
 
-	// are the groups as expected?
+	// Check if the groups are as expected
 	for _, g := range groups {
 		_, ok := c.Groups[g]
-		if ok != true {
-			t.Fatalf("missing group %v", g)
+		if !ok {
+			t.Fatalf("Missing expected group %v in config: %+v", g, c)
 		}
 	}
 
-	// any un-allocated shards?
+	// Check for any un-allocated shards
 	if len(groups) > 0 {
 		for s, g := range c.Shards {
 			_, ok := c.Groups[g]
-			if ok == false {
-				t.Fatalf("shard %v -> invalid group %v", s, g)
+			if !ok {
+				t.Fatalf("Shard %v assigned to invalid group %v in config: %+v", s, g, c)
 			}
 		}
 	}
@@ -49,30 +50,33 @@ func check(t *testing.T, groups []int, ck *Clerk) {
 		}
 	}
 	if max > min+1 {
-		t.Fatalf("max %v too much larger than min %v", max, min)
+		t.Fatalf("Shard distribution imbalance: Max shards per group (%d) exceeds min shards per group (%d) by more than 1. Current configuration: %+v", max, min, c)
 	}
 }
 
 func check_same_config(t *testing.T, c1 Config, c2 Config) {
+	t.Logf("Comparing configurations:\n  c1: %+v\n  c2: %+v\n", c1, c2) // Log the configs
+
 	if c1.Num != c2.Num {
-		t.Fatalf("Num wrong")
+		t.Fatalf("Configuration mismatch: Num in c1 (%d) differs from Num in c2 (%d)", c1.Num, c2.Num)
 	}
 	if c1.Shards != c2.Shards {
-		t.Fatalf("Shards wrong")
+		t.Fatalf("Configuration mismatch: Shards in c1 (%v) differ from Shards in c2 (%v)", c1.Shards, c2.Shards)
 	}
 	if len(c1.Groups) != len(c2.Groups) {
-		t.Fatalf("number of Groups is wrong")
+		t.Fatalf("Configuration mismatch: Number of groups in c1 (%d) differs from c2 (%d)", len(c1.Groups), len(c2.Groups))
 	}
 	for gid, sa := range c1.Groups {
 		sa1, ok := c2.Groups[gid]
-		if ok == false || len(sa1) != len(sa) {
-			t.Fatalf("len(Groups) wrong")
+		if !ok {
+			t.Fatalf("Configuration mismatch: Group %d missing in c2", gid)
 		}
-		if ok && len(sa1) == len(sa) {
-			for j := 0; j < len(sa); j++ {
-				if sa[j] != sa1[j] {
-					t.Fatalf("Groups wrong")
-				}
+		if len(sa1) != len(sa) {
+			t.Fatalf("Configuration mismatch: Length of servers for group %d in c1 (%d) differs from c2 (%d)", gid, len(sa), len(sa1))
+		}
+		for j := 0; j < len(sa); j++ {
+			if sa[j] != sa1[j] {
+				t.Fatalf("Configuration mismatch: Servers for group %d differ at index %d: c1 has '%s', c2 has '%s'", gid, j, sa[j], sa1[j])
 			}
 		}
 	}

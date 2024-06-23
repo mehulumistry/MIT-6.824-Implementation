@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"github.com/DistributedClocks/GoVector/govec"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"math/big"
@@ -54,9 +55,10 @@ type config struct {
 	maxraftstate int
 	start        time.Time // time at which make_config() was called
 	// begin()/end() statistics
-	t0    time.Time // time at which test_test.go called cfg.begin()
-	rpcs0 int       // rpcTotal() at start of test
-	ops   int32     // number of clerk get/put/append method calls
+	t0           time.Time // time at which test_test.go called cfg.begin()
+	rpcs0        int       // rpcTotal() at start of test
+	ops          int32     // number of clerk get/put/append method calls
+	testerVClock *govec.GoLog
 }
 
 func (cfg *config) checkTimeout() {
@@ -285,8 +287,9 @@ func (cfg *config) ShutdownServer(i int) {
 
 // If restart servers, first call ShutdownServer
 func (cfg *config) StartServer(i int) {
-	cfg.mu.Lock()
+	cfg.net.InitVClock(i)
 
+	cfg.mu.Lock()
 	// a fresh set of outgoing ClientEnd names.
 	cfg.endnames[i] = make([]string, cfg.n)
 	for j := 0; j < cfg.n; j++ {
@@ -376,6 +379,14 @@ func make_config(t *testing.T, n int, unreliable bool, maxraftstate int) *config
 	cfg.nextClientId = cfg.n + 1000 // client ids start 1000 above the highest serverid
 	cfg.maxraftstate = maxraftstate
 	cfg.start = time.Now()
+
+	configV := govec.GoLogConfig{
+		PrintOnScreen: true,
+		LogToFile:     true,
+		UseTimestamps: true,
+	}
+
+	cfg.testerVClock = govec.InitGoVector(fmt.Sprintf("%v", t.Name()), fmt.Sprintf("LogFile-%v", t.Name()), configV)
 
 	// create a full set of KV servers.
 	for i := 0; i < cfg.n; i++ {

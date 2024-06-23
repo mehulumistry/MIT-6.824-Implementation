@@ -73,6 +73,8 @@ type Log struct {
 
 // Raft A Go object implementing a single Raft peer.
 type Raft struct {
+	id string
+
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
@@ -525,6 +527,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // tester or service expects Raft to send ApplyMsg messages.
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
+
+func MakeRaft(id string, peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg) *Raft {
+	rf := Make(peers, me, persister, applyCh)
+	rf.id = id
+	return rf
+}
+
 func Make(peers []*labrpc.ClientEnd, me int, persister *Persister, applyCh chan ApplyMsg) *Raft {
 
 	rf := &Raft{}
@@ -662,7 +671,7 @@ func (rf *Raft) startElection() {
 						rf.heartbeatTimer = time.NewTimer(APPEND_ENTRIES_CALLS_FREQ)
 						rf.updateToLeaderRole()
 						rf.mu.Unlock()
-						log.Printf("👑 [New Leader Elected] | Node: %d | Term: %d", rf.me, rf.currentTerm)
+						log.Printf("👑 [New Leader Elected: ID: %s] | Node: %d | Term: %d", rf.id, rf.me, rf.currentTerm)
 
 						go rf.heartBeatTicker()
 					} else {

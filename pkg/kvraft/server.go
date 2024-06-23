@@ -1,12 +1,16 @@
 package kvraft
 
 import (
+	"bytes"
+	"fmt"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/labrpc"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"log"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = false
@@ -17,31 +21,102 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	}
 	return
 }
+func DPrintfId(requestId string, id int, role string, format string, a ...interface{}) (n int, err error) {
+	if Debug {
+		strId := time.Now().String() + " [SERVER_ID:" + "[" + strconv.Itoa(id) + "][" + role + "][RequestId:" + requestId + "]"
+		msg := fmt.Sprintf(strId+format, a...)
+		//utils.logger.LogLocalEvent(msg, govec.GetDefaultLogOptions())
+		fmt.Println(msg)
+	}
+	return
+}
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	Operation string
+	RequestId int64
+	ClerkId   int64
+	Key       string
+	Value     string
 }
 
 type KVServer struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
-	dead    int32 // set by Kill()
+	mu sync.Mutex
+	me int
+	rf *raft.Raft
 
-	maxraftstate int // snapshot if log grows this big
-
-	// Your definitions here.
+	persister        *raft.Persister
+	applyCh          chan raft.ApplyMsg
+	dead             int32 // set by Kill()
+	killCh           chan struct{}
+	maxraftstate     int // snapshot if log grows this big
+	inMem            map[string]string
+	clientLastSeqNum map[int64]int64
+	waitCh           map[string]chan string
 }
 
-func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+func (kv *KVServer) CallRaft(op Op, reply *Reply) {
+
+	reply.Timeout = false
+	reply.Success = false
+	reply.Value = ""
+
+	_, isLeader := kv.rf.GetState()
+	reply.IsLeader = isLeader
+
+	if !isLeader {
+		reply.IsLeader = false
+		return
+	}
+
+	_, _, leader := kv.rf.Start(op)
+	reply.IsLeader = leader
+
+	if !leader {
+		reply.IsLeader = false
+		return
+	}
+
+	kv.mu.Lock()
+	uniqueRequestId := fmt.Sprintf("%d:%d", op.ClerkId, op.RequestId)
+	ch := make(chan string, 1)
+	kv.waitCh[uniqueRequestId] = ch
+	kv.mu.Unlock()
+
+	select {
+	case value := <-ch:
+		//DPrintf("Confirmed [%s] Value of key: %v, %v, id: %v post-Raft", op.Operation, op.Key, op.Value, uniqueRequestId)
+		reply.Value = value
+		reply.Success = true
+
+	case <-time.After(800 * time.Millisecond): // Timeout after 800ms if not found
+		//DPrintf("[%s]Timeout - Failed to find value for key: %v, id: %v", op.Operation, op.Key, uniqueRequestId)
+		kv.mu.Lock()
+		delete(kv.waitCh, uniqueRequestId)
+		kv.mu.Unlock()
+		reply.Timeout = true
+	}
 }
 
-func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+func (kv *KVServer) Get(args *GetArgs, reply *Reply) {
+	op := Op{
+		RequestId: args.RequestId,
+		Key:       args.Key,
+		Operation: "Get",
+		ClerkId:   args.ClerkId,
+	}
+
+	kv.CallRaft(op, reply)
+}
+
+func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *Reply) {
+	op := Op{
+		RequestId: args.RequestId,
+		Key:       args.Key,
+		Operation: args.Op,
+		Value:     args.Value,
+		ClerkId:   args.ClerkId,
+	}
+	kv.CallRaft(op, reply)
 }
 
 // Kill the tester calls Kill() when a KVServer instance won't
@@ -55,12 +130,109 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	// Your code here, if desired.
+	close(kv.killCh)
 }
 
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
+}
+
+func (kv *KVServer) readApplyCh() {
+	for {
+		select {
+		case <-kv.killCh:
+			return
+		case msg := <-kv.applyCh:
+			if msg.CommandValid {
+				op := msg.Command.(Op)
+				kv.mu.Lock()
+				kv.applyCommand(op)
+				kv.mu.Unlock()
+
+				if kv.maxraftstate != -1 && kv.persister.RaftStateSize() >= kv.maxraftstate {
+					kv.rf.Snapshot(msg.CommandIndex, kv.encodeKVData())
+				}
+
+			}
+			if msg.SnapshotValid {
+				kv.mu.Lock()
+				kv.recover(msg.Snapshot)
+				kv.mu.Unlock()
+			}
+		}
+	}
+}
+
+func (kv *KVServer) applyCommand(op Op) {
+	currentRequestId := op.RequestId
+	clerkId := op.ClerkId
+	uniqueRequestId := fmt.Sprintf("%d:%d", clerkId, currentRequestId)
+
+	currentKey := op.Key
+
+	switch op.Operation {
+	case "Put":
+		if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
+			kv.inMem[currentKey] = op.Value
+			kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+		}
+	case "Append":
+		if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
+			existingVal, exists := kv.inMem[currentKey]
+			if !exists {
+				existingVal = ""
+			}
+			kv.inMem[currentKey] = existingVal + op.Value
+			kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+		}
+	case "Get":
+	default:
+		fmt.Printf("Unknown operation: %s\n", op.Operation) // Or log the error
+	}
+
+	if ch, ok := kv.waitCh[uniqueRequestId]; ok {
+		ch <- kv.inMem[currentKey]
+		close(ch)
+		delete(kv.waitCh, uniqueRequestId)
+	}
+
+}
+
+func (kv *KVServer) recover(data []byte) {
+	if data == nil || len(data) < 1 {
+		data = kv.persister.ReadSnapshot()
+	}
+
+	if data == nil || len(data) < 1 {
+		return
+	}
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var kvData map[string]string
+	var seenIds map[int64]int64
+
+	if d.Decode(&kvData) != nil || d.Decode(&seenIds) != nil {
+		log.Fatal("kv recover err")
+	} else {
+		kv.inMem = kvData
+		kv.clientLastSeqNum = seenIds
+	}
+}
+
+func (kv *KVServer) encodeKVData() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	if err := e.Encode(kv.inMem); err != nil {
+		panic(err)
+	}
+	if err := e.Encode(kv.clientLastSeqNum); err != nil {
+		panic(err)
+	}
+	data := w.Bytes()
+	return data
 }
 
 // StartKVServer servers[] contains the ports of the set of
@@ -84,12 +256,20 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
+	kv.killCh = make(chan struct{})
+	kv.inMem = make(map[string]string)
+	kv.clientLastSeqNum = make(map[int64]int64)
+
+	kv.waitCh = make(map[string]chan string)
+	kv.persister = persister
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	// You may need initialization code here.
+	kv.recover(nil)
+	go kv.readApplyCh()
 
 	return kv
 }
+
+// Utils

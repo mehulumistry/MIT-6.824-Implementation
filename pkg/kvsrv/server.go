@@ -57,7 +57,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	// 1. Check for Duplicates
 	if existingData, exists := kv.seenIds[args.RequestId]; exists {
-		DPrintf("Duplicate Request...%v", ShowLast4digit(args.RequestId))
+		DPrintf("Duplicate Request...%+v", args.RequestId)
 		endIndex := existingData
 		reply.Value = kv.inMem[args.Key][0:endIndex]
 		return

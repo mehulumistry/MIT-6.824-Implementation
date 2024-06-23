@@ -4,7 +4,7 @@ go 1.17
 
 replace github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob => ../labgob
 
-require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-20240430080521-f5af5ee7d58b
+require github.com/mehulumistry/MIT-6.824-Implementation/pkg/labgob v0.0.0-20240512065008-bfe255afa50e
 
 require (
 	github.com/DistributedClocks/GoVector v0.0.0-20240117185643-ae07272d0ebd // indirect

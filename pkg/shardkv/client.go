@@ -40,6 +40,8 @@ type Clerk struct {
 	config   shardctrler.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	clerkId    int64
+	nextSeqNum int64
 }
 
 // MakeClerk the tester calls MakeClerk.
@@ -53,6 +55,8 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck := new(Clerk)
 	ck.sm = shardctrler.MakeClerk(ctrlers)
 	ck.make_end = make_end
+	ck.clerkId = nrand()
+	ck.nextSeqNum = 0
 	// You'll have to add code here.
 	return ck
 }
@@ -64,6 +68,10 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
+	args.RequestId = ck.nextSeqNum
+	args.ClerkId = ck.clerkId
+
+	ck.nextSeqNum++
 
 	for {
 		shard := key2shard(key)
@@ -80,7 +88,6 @@ func (ck *Clerk) Get(key string) string {
 				if ok && (reply.Err == ErrWrongGroup) {
 					break
 				}
-				// ... not ok, or ErrWrongLeader
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -98,6 +105,10 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Key = key
 	args.Value = value
 	args.Op = op
+	args.RequestId = ck.nextSeqNum
+	args.ClerkId = ck.clerkId
+
+	ck.nextSeqNum++
 
 	for {
 		shard := key2shard(key)

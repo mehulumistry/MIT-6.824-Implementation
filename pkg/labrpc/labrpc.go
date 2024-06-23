@@ -112,7 +112,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 		// the request has been sent.
 	case <-e.done:
 		// entire Network has been destroyed.
-		log.Printf("Network is destroyed... for %d\n\n", e.endname)
+		//log.Printf("Network is destroyed... for %d\n\n", e.endname)
 		return false
 	}
 
@@ -163,7 +163,7 @@ func (e *ClientEnd) CallWithVClock(me int, svcMeth string, args interface{}, rep
 		// the request has been sent.
 	case <-e.done:
 		// entire Network has been destroyed.
-		log.Printf("Network is destroyed... for %d\n\n", e.endname)
+		//log.Printf("Network is destroyed... for %d\n\n", e.endname)
 		return false
 	}
 
