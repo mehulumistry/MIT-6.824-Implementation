@@ -8,7 +8,6 @@ import (
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/raft"
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/shardctrler"
 	"log"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -153,18 +152,19 @@ func (kv *ShardKV) pullConfig() {
 
 			//DPrintf("[ShardKV %d] Checking shard statuses for 'wait' state", kv.me)
 			kv.mu.Lock()
-			if kv.checkShardStatus("wait") {
-				DPrintf("[ShardKV %d][GID %d]  Found shard in 'wait' state, sleeping  %+v", kv.me, kv.gid, kv.shardStatus)
-				kv.mu.Unlock()
-				time.Sleep(PullConfigInterval)
-				continue
-			}
 
 			//DPrintf("[ShardKV %d] Checking shard statuses for 'push' state", kv.me)
 			if kv.checkShardStatus("push") {
 				DPrintf("[ShardKV %d][GID %d]  Found shard in 'push' state, processing pending migrations, %+v", kv.me, kv.gid, kv.shardStatus)
 				// Unlocked inside
 				kv.processPendingMigrations()
+				time.Sleep(PullConfigInterval)
+				continue
+			}
+
+			if kv.checkShardStatus("wait") {
+				DPrintf("[ShardKV %d][GID %d]  Found shard in 'wait' state, sleeping  %+v", kv.me, kv.gid, kv.shardStatus)
+				kv.mu.Unlock()
 				time.Sleep(PullConfigInterval)
 				continue
 			}
@@ -186,6 +186,7 @@ func (kv *ShardKV) pullConfig() {
 					time.Sleep(PullConfigInterval)
 					continue
 				}
+				// BUG: If no err should we direcly start the migration?
 			} else {
 				kv.mu.Unlock()
 			}
@@ -199,9 +200,9 @@ func (kv *ShardKV) shouldUpdateConfig(newCfg shardctrler.Config) (bool, Op) {
 	// Only update if the config is newer than the currently applied one
 	if newCfg.Num > kv.sctrlerCfg.Num || newCfg.Num == 0 {
 		newShardStatus := kv.calculateNewShardStatus(newCfg)
-		DPrintf("[ShardKV %d][GID %d]  Calculated new shard status: %+v", kv.me, kv.gid, newShardStatus)
+		DPrintf("[ShardKV %d][GID %d][ConfigNum: %d]  Calculated new shard status: %+v", kv.me, kv.gid, newCfg.Num, newShardStatus)
 
-		if !reflect.DeepEqual(newShardStatus, kv.shardStatus) || newCfg.Num > kv.sctrlerCfg.Num {
+		if newCfg.Num > kv.sctrlerCfg.Num {
 			DPrintf("[ShardKV %d][GID %d]  Shard status has changed or new config number is higher", kv.me, kv.gid)
 			return true, Op{
 				Operation:      "UpdateConfig",
@@ -540,7 +541,7 @@ func (kv *ShardKV) applyCommand(op Op) {
 		newCfg := op.ShardCfg
 
 		// Check if the config is newer
-		if newCfg.Num >= kv.sctrlerCfg.Num {
+		if newCfg.Num > kv.sctrlerCfg.Num {
 			// Update kv.sctrlerCfg
 			kv.sctrlerCfg = newCfg.Copy() // Note: ensure deep copy if necessary
 			kv.shardStatus = deepCopyMapInt(op.ShardStatusMap)
