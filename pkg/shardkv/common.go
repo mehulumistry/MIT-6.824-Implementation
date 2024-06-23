@@ -15,10 +15,8 @@ const (
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrWrongLeader = "ErrWrongLeader"
 	ErrWrongConfig = "ErrWrongConfig" // Migrated
-	ErrInMigration = "ErrInMigration"
+	ErrTimeOut     = "ErrTimeOut"     // Migrated
 )
-
-type Err string
 
 // Put or Append
 type PutAppendArgs struct {
@@ -34,14 +32,13 @@ type PutAppendArgs struct {
 }
 
 type PutAppendReply struct {
-	Err Err
+	Err string
 }
 
 type Reply struct {
-	Value    string
-	IsLeader bool
-	Success  bool
-	Timeout  bool
+	Value   string
+	Success bool
+	Err     string
 }
 
 type GetArgs struct {
@@ -52,7 +49,7 @@ type GetArgs struct {
 }
 
 type GetReply struct {
-	Err   Err
+	Err   string
 	Value string
 }
 
@@ -68,5 +65,5 @@ type MigrateShardArgs struct {
 }
 
 type MigrateShardReply struct {
-	Err Err // Result of the migration (OK if successful, otherwise an error)
+	Err string
 }

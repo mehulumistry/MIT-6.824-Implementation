@@ -9,6 +9,7 @@ import (
 	"github.com/mehulumistry/MIT-6.824-Implementation/pkg/shardctrler"
 	"log"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,23 +93,20 @@ const (
 
 func (kv *ShardKV) CallRaft(op Op) Reply {
 	reply := Reply{}
-	reply.Timeout = false
 	reply.Success = false
 	reply.Value = ""
 
 	_, isLeader := kv.rf.GetState()
-	reply.IsLeader = isLeader
 
 	if !isLeader {
-		reply.IsLeader = false
+		reply.Err = ErrWrongLeader
 		return reply
 	}
 
 	_, _, leader := kv.rf.Start(op)
-	reply.IsLeader = leader
 
 	if !leader {
-		reply.IsLeader = false
+		reply.Err = ErrWrongLeader
 		return reply
 	}
 
@@ -120,7 +118,13 @@ func (kv *ShardKV) CallRaft(op Op) Reply {
 
 	select {
 	case value := <-ch:
-		//DPrintf("Confirmed [%s] Value of key: %v, %v, id: %v post-Raft", op.Operation, op.Key, op.Value, uniqueRequestId)
+		DPrintf("[GID: %d][KVSERVER: %d]Confirmed [%s] Value of key: %v, %v, id: %v post-Raft",
+			kv.gid, kv.me, op.Operation, op.Key, value, uniqueRequestId)
+		if strings.Contains(value, "Err") {
+			reply.Success = false
+			reply.Err = value
+			return reply
+		}
 		reply.Value = value
 		reply.Success = true
 		return reply
@@ -129,7 +133,7 @@ func (kv *ShardKV) CallRaft(op Op) Reply {
 		kv.mu.Lock()
 		delete(kv.waitCh, uniqueRequestId)
 		kv.mu.Unlock()
-		reply.Timeout = true
+		reply.Err = ErrTimeOut
 		return reply
 	}
 }
@@ -215,11 +219,8 @@ func (kv *ShardKV) shouldUpdateConfig(newCfg shardctrler.Config) (bool, Op) {
 func (kv *ShardKV) applyConfigUpdate(op Op) error {
 	reply := kv.CallRaft(op)
 	if !reply.Success {
-		if !reply.IsLeader {
-			DPrintf("[ShardKV %d][GID %d]  ErrWrongLeader while applying config update", kv.me, kv.gid)
-		} else {
-			DPrintf("[ShardKV %d][GID %d]  Failed to apply config update", kv.me, kv.gid)
-		}
+		DPrintf("[ShardKV %d][GID %d]  Failed to apply config update Err: %s", kv.me, kv.gid, reply.Err)
+
 		return fmt.Errorf("failed to apply config update")
 	}
 	DPrintf("[ShardKV %d][GID %d]  Successfully applied config update", kv.me, kv.gid)
@@ -298,7 +299,7 @@ func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Confi
 
 	// BUG: What if this never succeeds or fails right after one RPC call?
 	reply := &MigrateShardReply{}
-	maxRetries := 10
+	maxRetries := 5
 	retryCount := 0
 
 	for {
@@ -367,13 +368,7 @@ func (kv *ShardKV) processPendingMigrations() {
 
 		replyUpdateShard := kv.CallRaft(opUpdateShard)
 		if !replyUpdateShard.Success {
-			if !replyUpdateShard.IsLeader {
-				DPrintf("[ERROR] ShardKV %d: ErrWrongLeader while replyUpdateShard. Retrying", kv.me)
-				continue
-			} else {
-				DPrintf("[ERROR] ShardKV %d: failed to replyUpdateShard. Retrying", kv.me)
-				continue
-			}
+			DPrintf("[ERROR][GID: %d] ShardKV %d: ErrWrongLeader while replyUpdateShard. Retrying %s", kv.gid, kv.me, replyUpdateShard.Err)
 		}
 	}
 }
@@ -458,23 +453,39 @@ func (kv *ShardKV) applyCommand(op Op) {
 	clerkId := op.ClerkId
 	uniqueRequestId := fmt.Sprintf("%d:%d", clerkId, currentRequestId)
 	currentKey := op.Key
+	var response string = ""
 
 	switch op.Operation {
 	case "Put":
-		if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
-			kv.inMem[key2shard(op.Key)][currentKey] = op.Value
-			kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+		if kv.shardStatus[op.Shard] == "running" {
+			if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
+				kv.inMem[key2shard(op.Key)][currentKey] = op.Value
+				kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+				response = kv.inMem[key2shard(op.Key)][currentKey]
+			}
+		} else {
+			response = ErrWrongGroup
 		}
 	case "Append":
-		if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
-			existingVal, exists := kv.inMem[key2shard(op.Key)][currentKey]
-			if !exists {
-				existingVal = ""
+		if kv.shardStatus[op.Shard] == "running" {
+			if v, ok := kv.clientLastSeqNum[op.ClerkId]; !ok || v < op.RequestId {
+				existingVal, exists := kv.inMem[key2shard(op.Key)][currentKey]
+				if !exists {
+					existingVal = ""
+				}
+				kv.inMem[key2shard(op.Key)][currentKey] = existingVal + op.Value
+				kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+				response = kv.inMem[key2shard(op.Key)][currentKey]
 			}
-			kv.inMem[key2shard(op.Key)][currentKey] = existingVal + op.Value
-			kv.clientLastSeqNum[op.ClerkId] = op.RequestId
+		} else {
+			response = ErrWrongGroup
 		}
 	case "Get":
+		if kv.shardStatus[op.Shard] != "running" {
+			response = ErrWrongGroup
+		} else {
+			response = kv.inMem[key2shard(op.Key)][currentKey]
+		}
 	case "UpdateShard":
 		// Only update if the operation's ShardCfgNum matches the current configuration number
 		if op.ShardCfgNum == kv.sctrlerCfg.Num {
@@ -486,11 +497,14 @@ func (kv *ShardKV) applyCommand(op Op) {
 				// Clear shard data if the shard status is being set to "migrated"
 				if op.ShardStatus == "migrated" {
 					kv.inMem[op.Shard] = make(map[string]string)
-					DPrintf("[KVServer: %d] Shard %d data cleared due to migration", kv.me, op.Shard)
+					DPrintf("[KVServer: %d][GID: %d] Shard %d data cleared due to migration", kv.me, kv.gid, op.Shard)
 				}
 			} else {
-				DPrintf("[KVServer: %d] Invalid status transition for shard %d: %s -> %s", kv.me, op.Shard, currentStatus, op.ShardStatus)
+				response = ErrWrongGroup
+				DPrintf("[KVServer: %d][GID: %d] Invalid status transition for shard %d: %s -> %s", kv.me, kv.gid, op.Shard, currentStatus, op.ShardStatus)
 			}
+		} else {
+			response = ErrWrongConfig
 		}
 	case "MigrateShard":
 		// Check if the operation's ShardCfgNum matches the current configuration number
@@ -503,24 +517,24 @@ func (kv *ShardKV) applyCommand(op Op) {
 						kv.clientLastSeqNum[clientId] = seqNum
 					} else {
 						// If the seqNum is smaller, reject the migration for this client
-						DPrintf("[KVServer: %d] Rejecting migration for client %d due to older seqNum: %d < %d", kv.me, clientId, seqNum, kv.clientLastSeqNum[clientId])
+						DPrintf("[KVServer: %d][GID: %d] Rejecting migration for client %d due to older seqNum: %d < %d", kv.me, kv.gid, clientId, seqNum, kv.clientLastSeqNum[clientId])
 						continue
 					}
 				}
-
 				// Apply the migration data
 				for k, v := range op.Data {
 					kv.inMem[op.Shard][k] = v
 				}
 				kv.shardStatus[op.Shard] = "running"
-				DPrintf("[KVServer: %d] Shard %d set to running", kv.me, op.Shard)
+				DPrintf("[KVServer: %d][GID: %d] Shard %d set to running", kv.me, kv.gid, op.Shard)
 			} else {
 				// If the shard status is not "wait", reject the migration
-				DPrintf("[KVServer: %d] Rejecting migration for shard %d because it is not in 'wait' state", kv.me, op.Shard)
+				response = ErrWrongGroup
+				DPrintf("[KVServer: %d][GID: %d] Rejecting migration for shard %d because it is not in 'wait' state", kv.me, kv.gid, op.Shard)
 			}
 		} else {
-			// If the ShardCfgNum does not match, reject the migration
-			DPrintf("[KVServer: %d] Rejecting migration for shard %d due to mismatched config number: %d != %d", kv.me, op.Shard, op.ShardCfgNum, kv.sctrlerCfg.Num)
+			response = ErrWrongConfig
+			DPrintf("[KVServer: %d][GID: %d] Rejecting migration for shard %d due to mismatched config number: %d != %d", kv.me, kv.gid, op.Shard, op.ShardCfgNum, kv.sctrlerCfg.Num)
 		}
 	case "UpdateConfig":
 		newCfg := op.ShardCfg
@@ -533,6 +547,7 @@ func (kv *ShardKV) applyCommand(op Op) {
 
 			DPrintf("[ShardKV %d] [GID %d] Successfully applied new config: %+v", kv.me, kv.gid, newCfg)
 		} else {
+			response = ErrWrongConfig
 			DPrintf("[ShardKV %d] [GID %d] Ignoring stale config: %+v", kv.me, kv.gid, newCfg)
 		}
 
@@ -541,16 +556,6 @@ func (kv *ShardKV) applyCommand(op Op) {
 	}
 
 	if ch, ok := kv.waitCh[uniqueRequestId]; ok {
-		var response string
-
-		switch op.Operation {
-		case "Get", "Put", "Append":
-			response = kv.inMem[key2shard(op.Key)][currentKey]
-		default:
-			// Do not return to the channel if the operation is not Get, Put, or Append
-			response = ""
-		}
-
 		ch <- response
 		close(ch)
 		delete(kv.waitCh, uniqueRequestId)
@@ -660,6 +665,7 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 		Key:       args.Key,
 		Operation: "Get",
 		ClerkId:   args.ClerkId,
+		Shard:     shard,
 	}
 
 	result := kv.CallRaft(op)
@@ -669,14 +675,8 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 			kv.gid, gid, kv.me, args.Key, args.ClerkId, args.RequestId, result.Value, kv.sctrlerCfg, key2shard(args.Key))
 		reply.Value = result.Value
 		reply.Err = OK
-	} else if result.Timeout {
-		reply.Err = "Timeout"
-		DPrintf("[GID: %d][KVServer %d][GET][Key: %s][TIMEOUT][ClerkId: %d][RequestId: %d][Args: %+v]",
-			kv.gid, kv.me, args.Key, args.ClerkId, args.RequestId, args)
-	} else if !result.IsLeader {
-		reply.Err = ErrWrongLeader
-		//DPrintf("[GID: %d][KVServer %d][GET][WRONG_LEADER][ClerkId: %d][RequestId: %d][Args: %+v]",
-		//	kv.gid, kv.me, args.ClerkId, args.RequestId, args)
+	} else {
+		reply.Err = result.Err
 	}
 }
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
@@ -709,6 +709,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		Operation: args.Op,
 		Value:     args.Value,
 		ClerkId:   args.ClerkId,
+		Shard:     shard,
 	}
 
 	//DPrintf("[GID: %d][KVServer %d][PUT][REQUEST][ClerkId: %d][RequestId: %d][Args: %+v]",
@@ -717,15 +718,11 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	result := kv.CallRaft(op)
 
 	if result.Success {
-		DPrintf("[GID: %d][KVServer %d][%s][SUCCESS][ClerkId: %d][RequestId: %d][Shard: %d][Status: %+v][INMEM: %+v]",
-			kv.gid, kv.me, args.Op, args.ClerkId, args.RequestId, key2shard(args.Key), kv.shardStatus, kv.inMem)
+		DPrintf("[GID: %d][KVServer %d][%s][SUCCESS][KEY: %s][VALUE: %s][ClerkId: %d][RequestId: %d][Shard: %d][Status: %+v]",
+			kv.gid, kv.me, args.Op, args.Key, args.Value, args.ClerkId, args.RequestId, key2shard(args.Key), kv.shardStatus)
 		reply.Err = OK
-	} else if result.Timeout {
-		reply.Err = "Timeout"
-		DPrintf("[GID: %d][KVServer %d][%s][TIMEOUT][ClerkId: %d][RequestId: %d][Args: %+v]",
-			kv.gid, kv.me, args.Op, args.ClerkId, args.RequestId, args)
-	} else if !result.IsLeader {
-		reply.Err = ErrWrongLeader
+	} else {
+		reply.Err = result.Err
 		//DPrintf("[GID: %d][KVServer %d][PUT][WRONG_LEADER][ClerkId: %d][RequestId: %d][Args: %+v]",
 		//	kv.gid, kv.me, args.ClerkId, args.RequestId, args)
 	}
@@ -758,14 +755,10 @@ func (kv *ShardKV) ReceiveShard(args *MigrateShardArgs, reply *MigrateShardReply
 		DPrintf("[ShardKV %d] [GID %d] Successfully received shard %d from GID %d (config: %+v, data: %+v)",
 			kv.me, kv.gid, args.Shard, args.GID, kv.sctrlerCfg, args.Data)
 		reply.Err = OK
-	} else if result.Timeout {
-		reply.Err = "Timeout"
-		DPrintf("[ShardKV %d] [GID %d] Shard %d migration timed out",
-			kv.me, kv.gid, args.Shard)
-	} else if !result.IsLeader {
-		reply.Err = ErrWrongLeader
-		DPrintf("[ShardKV %d] [GID %d] Shard %d migration failed: not leader",
-			kv.me, kv.gid, args.Shard)
+	} else {
+		reply.Err = result.Err
+		DPrintf("[ShardKV %d] [GID %d] Shard %d migration failed: %s",
+			kv.me, kv.gid, args.Shard, result.Err)
 	}
 
 }
