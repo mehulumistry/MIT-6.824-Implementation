@@ -298,7 +298,7 @@ func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Confi
 
 	// BUG: What if this never succeeds or fails right after one RPC call?
 	reply := &MigrateShardReply{}
-	maxRetries := 5
+	maxRetries := 10
 	retryCount := 0
 
 	for {
