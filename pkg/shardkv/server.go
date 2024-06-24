@@ -296,17 +296,17 @@ func (kv *ShardKV) migrateShard(args *MigrateShardArgs, cfg shardctrler.Config, 
 	time.Sleep(50 * time.Millisecond) // Wait before retrying
 	return -1
 }
-func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Config, newGID int) {
+func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Config, newGID int) bool {
 
 	// BUG: What if this never succeeds or fails right after one RPC call?
 	reply := &MigrateShardReply{}
-	maxRetries := 5
+	maxRetries := 3
 	retryCount := 0
 
 	for {
 		if retryCount >= maxRetries {
 			DPrintf("[ShardKV %d] [GID %d] Max retries reached for migrating shard %d to GID %d. Aborting.", kv.me, kv.gid, args.Shard, newGID)
-			return
+			return false
 		}
 
 		if servers, ok := cfg.Groups[newGID]; ok {
@@ -317,7 +317,7 @@ func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Confi
 				res := srv.Call("ShardKV.ReceiveShard", args, reply)
 				if res && reply.Err == OK {
 					DPrintf("[ShardKV %d] [GID %d] Migration of shard %d to GID %d successful, calling raft...", kv.me, kv.gid, args.Shard, newGID)
-					return
+					return true
 				} else {
 					DPrintf("[ShardKV %d] [GID %d] Migration of shard %d to GID %d failed: %v", kv.me, kv.gid, args.Shard, newGID, reply.Err)
 				}
@@ -326,6 +326,7 @@ func (kv *ShardKV) migrateShardOld(args *MigrateShardArgs, cfg shardctrler.Confi
 		retryCount++
 		time.Sleep(50 * time.Millisecond) // Wait before retrying
 	}
+	return false
 }
 
 func (kv *ShardKV) processPendingMigrations() {
@@ -356,9 +357,10 @@ func (kv *ShardKV) processPendingMigrations() {
 
 		// BUG: What if there is a failure here, whole group is down/left? this
 		// will keep retrying....
-		kv.migrateShardOld(args, cfg, kv.sctrlerCfg.Shards[shard])
+		success := kv.migrateShardOld(args, cfg, kv.sctrlerCfg.Shards[shard])
 
-		opUpdateShard := Op{
+		if success {
+			opUpdateShard := Op{
 			Operation:   "UpdateShard",
 			ShardStatus: "migrated",
 			RequestId:   args.RequestId,
@@ -371,6 +373,8 @@ func (kv *ShardKV) processPendingMigrations() {
 		if !replyUpdateShard.Success {
 			DPrintf("[ERROR][GID: %d] ShardKV %d: ErrWrongLeader while replyUpdateShard. Retrying %s", kv.gid, kv.me, replyUpdateShard.Err)
 		}
+		}
+		
 	}
 }
 
