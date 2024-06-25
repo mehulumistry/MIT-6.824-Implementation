@@ -10,12 +10,13 @@ package shardkv
 //
 
 const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongGroup  = "ErrWrongGroup"
-	ErrWrongLeader = "ErrWrongLeader"
-	ErrWrongConfig = "ErrWrongConfig" // Migrated
-	ErrTimeOut     = "ErrTimeOut"     // Migrated
+	OK                 = "OK"
+	ErrNoKey           = "ErrNoKey"
+	ErrWrongGroup      = "ErrWrongGroup"
+	ErrWrongLeader     = "ErrWrongLeader"
+	ErrWrongConfig     = "ErrWrongConfig" // Migrated
+	ErrTimeOut         = "ErrTimeOut"     // Migrated
+	ErrAlreadyMigrated = "ErrAlreadyMigrated"
 )
 
 // Put or Append
