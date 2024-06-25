@@ -312,7 +312,7 @@ func (kv *ShardKV) processPendingMigrations() {
 
 	kv.mu.Unlock()
 
-	// TODO: Starting from cfg:1 and looping over.
+	// TODO: Starting from cfg:1 and looping over. Can we start from already saved index....
 	//startIndex := 0 // Start from the first server index
 	for shard, args := range shardsToMigrate {
 
@@ -464,6 +464,7 @@ func (kv *ShardKV) applyCommand(op Op) {
 				// Clear shard data if the shard status is being set to "migrated"
 				if op.ShardStatus == "migrated" {
 					kv.inMem[op.Shard] = make(map[string]string)
+					kv.shardSeqNum = op.RequestId
 					DPrintf("[KVServer: %d][GID: %d] Shard %d data cleared due to migration", kv.me, kv.gid, op.Shard)
 				}
 			} else {
@@ -720,11 +721,11 @@ func (kv *ShardKV) ReceiveShard(args *MigrateShardArgs, reply *MigrateShardReply
 
 	op := Op{
 		ClerkId:       args.ClerkId,
-		RequestId:     args.RequestId,
+		RequestId:     args.RequestId, // Internal GID, SeqNum
 		Operation:     "MigrateShard",
 		Shard:         args.Shard,
 		Data:          args.Data,
-		ClientLastSeq: args.ClientLastSeqNum,
+		ClientLastSeq: args.ClientLastSeqNum, // External Client request Ids map
 		ShardCfgNum:   args.ConfigNum,
 	}
 
@@ -817,7 +818,7 @@ func StartServer(
 
 	kv.clientLastSeqNum = make(map[int64]int64)
 
-	kv.clerkId = nrand()
+	kv.clerkId = int64(kv.gid)
 	kv.shardSeqNum = 0
 	kv.inMem = make(map[int]map[string]string)
 	kv.shardStatus = make(map[int]string)
