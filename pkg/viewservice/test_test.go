@@ -16,7 +16,7 @@ func check(t *testing.T, ck *Clerk, p string, b string, n uint) {
 		t.Fatalf("wanted backup %v, got %v", b, view.Backup)
 	}
 	if n != 0 && n != view.Viewnum {
-		t.Fatalf("wanted viewnum %v, got %v", n, view.Viewnum)
+		t.Fatalf("wanted viewnum %+v, got %+v", n, view)
 	}
 	if ck.Primary() != p {
 		t.Fatalf("wanted primary %v, got %v", p, ck.Primary())

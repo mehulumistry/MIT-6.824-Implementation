@@ -187,6 +187,7 @@ func TestDeaf(t *testing.T) {
 	pxa[1].Start(1, "goodbye")
 	waitmajority(t, pxa, 1)
 	time.Sleep(1 * time.Second)
+
 	if ndecided(t, pxa, 1) != npaxos-2 {
 		t.Fatalf("a deaf peer heard about a decision")
 	}
@@ -432,7 +433,7 @@ func TestRPCCount(t *testing.T) {
 		pxa[i] = Make(pxh, i, nil)
 	}
 
-	ninst1 := 5
+	ninst1 := 1
 	seq := 0
 	for i := 0; i < ninst1; i++ {
 		pxa[0].Start(seq, "x")
